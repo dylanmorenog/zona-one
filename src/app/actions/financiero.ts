@@ -1,0 +1,412 @@
+"use server";
+
+import { getSession } from "@/app/actions/auth";
+import { prisma } from "@/lib/db";
+import {
+  calcularComision,
+  cajaChicaEfecto,
+  efectivoEfecto,
+  efectivoNecesarioRetiro,
+  tarjetaEfecto,
+} from "@/lib/financiero";
+import { revalidatePath } from "next/cache";
+
+function hoyDate() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+async function getEmpleadoId(rol: string) {
+  const u = await prisma.usuario.findFirst({
+    where: { rol: rol as "DUENO" | "EMPLEADO", activo: true },
+  });
+  if (!u) throw new Error("Usuario no encontrado");
+  return u.id;
+}
+
+// ─── Estado del día ───────────────────────────────────────────────────────────
+
+export async function getEstadoFinanciero() {
+  const hoy = hoyDate();
+  const manana = new Date(hoy.getTime() + 86400000);
+
+  const [config, apertura, movimientos, cierre] = await Promise.all([
+    prisma.configFinanciero.findFirst(),
+    prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } }),
+    prisma.movimientoFinanciero.findMany({
+      where: { hora: { gte: hoy, lt: manana } },
+      orderBy: { hora: "desc" },
+    }),
+    prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } }),
+  ]);
+
+  const capital = config ? Number(config.capitalTotal) : null;
+  const efectivoEmpleadaInicial = apertura ? Number(apertura.efectivoEmpleada) : null;
+  const saldoTarjetaInicial = apertura ? Number(apertura.saldoTarjetaInicial) : null;
+
+  const deltaEfectivo = movimientos.reduce(
+    (a, m) =>
+      a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+    0
+  );
+  const deltaTarjeta = movimientos.reduce(
+    (a, m) =>
+      a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+    0
+  );
+  const cajaChicaTotal = movimientos.reduce(
+    (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)),
+    0
+  );
+
+  const pendientes = movimientos.filter(
+    (m) => m.tipo === "RETIRO" && m.estado === "PENDIENTE"
+  ).length;
+
+  const efectivoEmpleada =
+    efectivoEmpleadaInicial !== null ? efectivoEmpleadaInicial + deltaEfectivo : null;
+
+  const saldoTarjeta =
+    saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjeta : null;
+
+  const cajaAzulTotal =
+    capital !== null && saldoTarjeta !== null ? capital - saldoTarjeta : null;
+
+  const sumaRetiros = movimientos
+    .filter((m) => m.tipo === "RETIRO" && m.estado === "COMPLETADO")
+    .reduce((a, m) => a + Number(m.monto), 0);
+  const sumaDepositos = movimientos
+    .filter((m) => m.tipo === "DEPOSITO" && m.estado === "COMPLETADO")
+    .reduce((a, m) => a + Number(m.monto), 0);
+
+  return {
+    capital,
+    efectivoEmpleadaInicial,
+    saldoTarjetaInicial,
+    efectivoEmpleada,
+    saldoTarjeta,
+    cajaAzulTotal,
+    cajaChicaTotal, // para Panel del Día; no se muestra en este módulo
+    pendientes,
+    sumaRetiros,
+    sumaDepositos,
+    tieneApertura: !!apertura,
+    tieneCierre: !!cierre,
+    cierre: cierre
+      ? {
+          sobrante: Number(cierre.sobrante),
+          efectivoFinal: Number(cierre.efectivoFinal),
+          cajaChicaCalculada: Number(cierre.cajaChicaCalculada),
+          cajaChicaReal: Number(cierre.cajaChicaReal),
+          diferenciaCajaChica: Number(cierre.diferenciaCajaChica),
+          saldoTarjetaEsperado: Number(cierre.saldoTarjetaEsperado),
+          saldoTarjetaReal: Number(cierre.saldoTarjetaReal),
+          diferencia: Number(cierre.diferencia),
+        }
+      : null,
+    movimientos: movimientos.map((m) => ({
+      id: m.id,
+      tipo: m.tipo as "RETIRO" | "DEPOSITO",
+      estado: m.estado as "PENDIENTE" | "COMPLETADO" | "CANCELADO",
+      tipoComision: m.tipoComision as "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA",
+      monto: Number(m.monto),
+      comision: Number(m.comision),
+      notas: m.notas,
+      hora: m.hora.toISOString(),
+      confirmadoEn: m.confirmadoEn?.toISOString() ?? null,
+    })),
+  };
+}
+
+// ─── Apertura del día ─────────────────────────────────────────────────────────
+
+export async function registrarApertura({
+  efectivoEmpleada,
+  saldoTarjetaInicial,
+}: {
+  efectivoEmpleada: number;
+  saldoTarjetaInicial: number;
+}) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = hoyDate();
+  if (await prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } })) {
+    throw new Error("Ya se registró la apertura de hoy");
+  }
+
+  const config = await prisma.configFinanciero.findFirst();
+  if (!config) throw new Error("No está configurado el capital");
+
+  const cajaAzul = Number(config.capitalTotal) - saldoTarjetaInicial;
+  if (efectivoEmpleada > cajaAzul) {
+    throw new Error(
+      `El efectivo (${efectivoEmpleada.toLocaleString("es-MX")}) supera la caja azul (${cajaAzul.toLocaleString("es-MX")})`
+    );
+  }
+
+  const empleadoId = await getEmpleadoId(session.rol);
+  await prisma.aperturaFinanciero.create({
+    data: { fecha: hoy, efectivoEmpleada, saldoTarjetaInicial, empleadoId },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Registrar movimiento ─────────────────────────────────────────────────────
+
+export async function registrarMovimiento({
+  tipo,
+  tipoComision,
+  pendiente = false,
+  monto,
+  notas,
+}: {
+  tipo: "RETIRO" | "DEPOSITO";
+  tipoComision: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA";
+  pendiente?: boolean;
+  monto: number;
+  notas?: string;
+}) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = hoyDate();
+  const manana = new Date(hoy.getTime() + 86400000);
+
+  const [apertura, cierre] = await Promise.all([
+    prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } }),
+    prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } }),
+  ]);
+
+  if (cierre) throw new Error("El día está cerrado. Las operaciones se registrarán el siguiente turno.");
+  if (!apertura) throw new Error("Primero registra la apertura del día");
+
+  const comision = calcularComision(monto);
+  const estado = tipo === "RETIRO" && pendiente ? "PENDIENTE" : "COMPLETADO";
+
+  // Verificar efectivo para retiros inmediatos
+  if (tipo === "RETIRO" && estado === "COMPLETADO") {
+    const movimientosHoy = await prisma.movimientoFinanciero.findMany({
+      where: { hora: { gte: hoy, lt: manana } },
+    });
+    const efectivoActual =
+      Number(apertura.efectivoEmpleada) +
+      movimientosHoy.reduce(
+        (a, m) =>
+          a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+        0
+      );
+
+    const necesario = efectivoNecesarioRetiro(tipoComision, monto, comision);
+    if (necesario > efectivoActual) {
+      throw new Error(
+        `Sin efectivo suficiente. Disponible: $${efectivoActual.toLocaleString("es-MX")}`
+      );
+    }
+  }
+
+  const empleadoId = await getEmpleadoId(session.rol);
+  await prisma.movimientoFinanciero.create({
+    data: { tipo, estado, tipoComision, monto, comision, notas: notas?.trim() || null, empleadoId },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Confirmar entrega de retiro pendiente ────────────────────────────────────
+
+export async function confirmarRetiro(movimientoId: number) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = hoyDate();
+  const manana = new Date(hoy.getTime() + 86400000);
+
+  const mov = await prisma.movimientoFinanciero.findUnique({ where: { id: movimientoId } });
+  if (!mov || mov.tipo !== "RETIRO" || mov.estado !== "PENDIENTE") {
+    throw new Error("Solo se pueden confirmar retiros pendientes");
+  }
+
+  const apertura = await prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } });
+  if (!apertura) throw new Error("Sin apertura del día");
+
+  const movimientosRestantes = await prisma.movimientoFinanciero.findMany({
+    where: { hora: { gte: hoy, lt: manana }, id: { not: movimientoId } },
+  });
+  const efectivoActual =
+    Number(apertura.efectivoEmpleada) +
+    movimientosRestantes.reduce(
+      (a, m) =>
+        a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+      0
+    );
+
+  const necesario = efectivoNecesarioRetiro(mov.tipoComision, Number(mov.monto), Number(mov.comision));
+  if (necesario > efectivoActual) {
+    throw new Error(
+      `Sin efectivo suficiente para entregar. Disponible: $${efectivoActual.toLocaleString("es-MX")}`
+    );
+  }
+
+  await prisma.movimientoFinanciero.update({
+    where: { id: movimientoId },
+    data: { estado: "COMPLETADO", confirmadoEn: new Date() },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Cancelar operación ───────────────────────────────────────────────────────
+
+export async function cancelarMovimiento(movimientoId: number) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = hoyDate();
+  const manana = new Date(hoy.getTime() + 86400000);
+
+  const mov = await prisma.movimientoFinanciero.findUnique({ where: { id: movimientoId } });
+  if (!mov) throw new Error("Operación no encontrada");
+  if (mov.estado === "CANCELADO") throw new Error("La operación ya está cancelada");
+
+  const esDeHoy = mov.hora >= hoy && mov.hora < manana;
+  if (!esDeHoy) throw new Error("Solo se pueden cancelar operaciones del día actual");
+
+  if (mov.tipo === "RETIRO" && mov.estado === "COMPLETADO" && session.rol !== "DUENO") {
+    throw new Error("Solo el dueño puede cancelar un retiro ya entregado");
+  }
+
+  await prisma.movimientoFinanciero.update({
+    where: { id: movimientoId },
+    data: { estado: "CANCELADO" },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Editar operación ─────────────────────────────────────────────────────────
+
+export async function editarMovimiento(
+  movimientoId: number,
+  { monto, notas }: { monto: number; notas?: string }
+) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = hoyDate();
+  const manana = new Date(hoy.getTime() + 86400000);
+
+  const mov = await prisma.movimientoFinanciero.findUnique({ where: { id: movimientoId } });
+  if (!mov) throw new Error("Operación no encontrada");
+  if (mov.estado === "CANCELADO") throw new Error("No se puede editar una operación cancelada");
+
+  const esDeHoy = mov.hora >= hoy && mov.hora < manana;
+  if (!esDeHoy && session.rol !== "DUENO") {
+    throw new Error("Solo se pueden editar operaciones del día actual");
+  }
+
+  await prisma.movimientoFinanciero.update({
+    where: { id: movimientoId },
+    data: { monto, comision: calcularComision(monto), notas: notas?.trim() || null },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Cierre del día ───────────────────────────────────────────────────────────
+
+export async function cerrarDia({
+  sobrante,
+  cajaChicaReal,
+  saldoTarjetaReal,
+}: {
+  sobrante: number;
+  cajaChicaReal: number;
+  saldoTarjetaReal: number;
+}) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = hoyDate();
+  if (await prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } })) {
+    throw new Error("El día ya fue cerrado");
+  }
+
+  const manana = new Date(hoy.getTime() + 86400000);
+  const [apertura, movimientos] = await Promise.all([
+    prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } }),
+    prisma.movimientoFinanciero.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
+  ]);
+
+  if (!apertura) throw new Error("No hay apertura registrada hoy");
+
+  const deltaEfectivo = movimientos.reduce(
+    (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+    0
+  );
+  const deltaTarjeta = movimientos.reduce(
+    (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+    0
+  );
+  const cajaChicaCalculada = movimientos.reduce(
+    (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)),
+    0
+  );
+
+  const efectivoFinal = Number(apertura.efectivoEmpleada) + deltaEfectivo;
+  const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
+  const diferencia = saldoTarjetaReal - saldoTarjetaEsperado;
+  const diferenciaCajaChica = cajaChicaReal - cajaChicaCalculada;
+
+  const empleadoId = await getEmpleadoId(session.rol);
+  await prisma.cierreFinanciero.create({
+    data: {
+      fecha: hoy,
+      sobrante,
+      efectivoFinal,
+      cajaChicaCalculada,
+      cajaChicaReal,
+      diferenciaCajaChica,
+      saldoTarjetaEsperado,
+      saldoTarjetaReal,
+      diferencia,
+      empleadoId,
+    },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Resetear día (pruebas) ───────────────────────────────────────────────────
+
+export async function resetearDia() {
+  const session = await getSession();
+  if (session?.rol !== "DUENO") throw new Error("Solo el dueño puede reiniciar el día");
+
+  const hoy = hoyDate();
+  const manana = new Date(hoy.getTime() + 86400000);
+
+  await prisma.cierreFinanciero.deleteMany({ where: { fecha: hoy } });
+  await prisma.cierreDia.deleteMany({ where: { fecha: hoy } });
+  await prisma.movimientoFinanciero.deleteMany({ where: { hora: { gte: hoy, lt: manana } } });
+  await prisma.aperturaFinanciero.deleteMany({ where: { fecha: hoy } });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Actualizar capital ───────────────────────────────────────────────────────
+
+export async function actualizarCapital(capitalTotal: number) {
+  const session = await getSession();
+  if (session?.rol !== "DUENO") throw new Error("Solo el dueño puede cambiar el capital");
+
+  await prisma.configFinanciero.upsert({
+    where: { id: 1 },
+    update: { capitalTotal },
+    create: { id: 1, capitalTotal },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}

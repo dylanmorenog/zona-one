@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm show *)",
+      "Bash(openssl rand *)",
+      "Bash(sed -i '' 's|cambia-esto-por-un-secreto-seguro|__TRACKED_VAR__|' /Users/dylanmoreno/Documents/zona-one/.env.local)",
+      "Bash(rm /Users/dylanmoreno/Documents/zona-one/src/lib/auth.ts /Users/dylanmoreno/Documents/zona-one/src/types/next-auth.d.ts /Users/dylanmoreno/Documents/zona-one/src/components/providers.tsx /Users/dylanmoreno/Documents/zona-one/src/app/api/auth/logout/route.ts /Users/dylanmoreno/Documents/zona-one/src/app/api/auth/[...nextauth]/route.ts)",
+      "Bash(rmdir /Users/dylanmoreno/Documents/zona-one/src/app/api/auth/[...nextauth] /Users/dylanmoreno/Documents/zona-one/src/app/api/auth /Users/dylanmoreno/Documents/zona-one/src/app/api /Users/dylanmoreno/Documents/zona-one/src/components /Users/dylanmoreno/Documents/zona-one/src/types)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)",
+      "Bash(npx prisma *)",
+      "Bash(curl -s http://localhost:3001/dashboard/xbox)",
+      "Bash(xargs ls -t)",
+      "Bash(node *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001)",
+      "Bash(curl -s http://localhost:3002/dashboard/financiero)",
+      "Bash(sort -k6,7)",
+      "Bash(curl -s http://localhost:3001/login)",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/login)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s http://localhost:3000/dashboard/historial)",
+      "Bash(npm list *)",
+      "Bash(xargs ls -1)",
+      "Bash(xargs ls -la)",
+      "Bash(mkdir -p /Users/dylanmoreno/Documents/zona-one/public)",
+      "Bash(cp /Users/dylanmoreno/.claude/image-cache/9d3df228-d85a-4e61-87a9-ef737da12029/1.png /Users/dylanmoreno/Documents/zona-one/public/logo.png)"
+    ]
+  }
+}
