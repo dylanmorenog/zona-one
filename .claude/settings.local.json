@@ -26,7 +26,13 @@
       "Bash(xargs ls -1)",
       "Bash(xargs ls -la)",
       "Bash(mkdir -p /Users/dylanmoreno/Documents/zona-one/public)",
-      "Bash(cp /Users/dylanmoreno/.claude/image-cache/9d3df228-d85a-4e61-87a9-ef737da12029/1.png /Users/dylanmoreno/Documents/zona-one/public/logo.png)"
+      "Bash(cp /Users/dylanmoreno/.claude/image-cache/9d3df228-d85a-4e61-87a9-ef737da12029/1.png /Users/dylanmoreno/Documents/zona-one/public/logo.png)",
+      "Bash(sed -i '' '/prisma\\\\/migrations\\\\//d' .gitignore)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(sed -n '95,120p' /Users/dylanmoreno/Documents/zona-one/src/components/financiero/FinancieroPanel.tsx)",
+      "Bash(sed -n '219,320p' /Users/dylanmoreno/Documents/zona-one/src/components/financiero/FinancieroPanel.tsx)"
     ]
   }
 }

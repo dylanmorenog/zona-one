@@ -5,7 +5,6 @@ import {
   cancelarMovimiento,
   confirmarRetiro,
   editarMovimiento,
-  registrarApertura,
   registrarMovimiento,
   resetearDia,
 } from "@/app/actions/financiero";
@@ -99,17 +98,13 @@ export function FinancieroPanel(props: EstadoFinanciero) {
 
   if (!props.tieneApertura) {
     return (
-      <div className="space-y-3">
-        <FormApertura
-          capital={props.capital}
-          cargando={!!cargando}
-          error={error}
-          onAbrir={(e, t) =>
-            ejecutar("apertura", () =>
-              registrarApertura({ efectivoEmpleada: e, saldoTarjetaInicial: t })
-            )
-          }
-        />
+      <div className="flex items-center justify-center min-h-[40vh]">
+        <div className="rounded-2xl border border-gray-800 bg-gray-900 px-8 py-10 text-center max-w-sm space-y-2">
+          <p className="text-base font-semibold text-white">Sin apertura registrada</p>
+          <p className="text-sm text-gray-500">
+            Registra la apertura del día desde el <span className="text-brand-400 font-medium">Panel del Día</span> para comenzar a operar.
+          </p>
+        </div>
       </div>
     );
   }
@@ -212,77 +207,6 @@ function SinConfig({
       >
         {cargando ? "Guardando..." : "Guardar"}
       </button>
-    </div>
-  );
-}
-
-// ─── Apertura del día ─────────────────────────────────────────────────────────
-
-function FormApertura({
-  capital,
-  cargando,
-  error,
-  onAbrir,
-}: {
-  capital: number;
-  cargando: boolean;
-  error: string | null;
-  onAbrir: (efectivoEmpleada: number, saldoTarjetaInicial: number) => void;
-}) {
-  const [efectivo, setEfectivo] = useState("");
-  const [tarjeta, setTarjeta] = useState("");
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); }, []);
-
-  const efectivoNum = parseFloat(efectivo) || 0;
-  const tarjetaNum = parseFloat(tarjeta) || 0;
-  const cajaAzul = capital - tarjetaNum;
-  const valido = efectivoNum >= 0 && tarjetaNum > 0 && tarjetaNum < capital && efectivoNum <= cajaAzul;
-
-  return (
-    <div className="mx-auto max-w-md">
-      <div className="rounded-2xl border border-gray-800 bg-gray-900 p-8 space-y-6">
-        <p className="text-base font-semibold text-white">Apertura del día</p>
-
-        <div>
-          <label className="mb-1.5 block text-sm text-gray-400">Saldo inicial de la tarjeta</label>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-            <input
-              type="number" min={0} step={100} value={tarjeta}
-              onChange={(e) => setTarjeta(e.target.value)}
-              placeholder="0.00"
-              className="w-full rounded-xl border border-gray-700 bg-gray-800 py-3 pl-9 pr-4 text-xl font-bold text-white focus:border-brand-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-sm text-gray-400">Efectivo en caja</label>
-          <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
-            <input
-              ref={ref}
-              type="number" min={0} step={100} value={efectivo}
-              onChange={(e) => setEfectivo(e.target.value)}
-              placeholder="0.00"
-              className="w-full rounded-xl border border-gray-700 bg-gray-800 py-3 pl-9 pr-4 text-xl font-bold text-white focus:border-brand-500 focus:outline-none"
-            />
-          </div>
-        </div>
-
-        {error && (
-          <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>
-        )}
-
-        <button
-          onClick={() => valido && onAbrir(efectivoNum, tarjetaNum)}
-          disabled={cargando || !valido}
-          className="w-full rounded-xl bg-brand-600 py-3.5 text-base font-bold text-white hover:bg-brand-500 disabled:opacity-40 transition"
-        >
-          {cargando ? "Registrando..." : "Abrir turno"}
-        </button>
-      </div>
     </div>
   );
 }

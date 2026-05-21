@@ -31,6 +31,7 @@ export async function getPanelDia() {
     cierreDia,
     todosProductos,
     gastosHoy,
+    configFinanciero,
   ] = await Promise.all([
     prisma.sesionXbox.findMany({ where: { inicio: { gte: hoy, lt: manana }, fin: { not: null } } }),
     prisma.consola.findMany({
@@ -46,6 +47,7 @@ export async function getPanelDia() {
     prisma.cierreDia.findFirst({ where: { fecha: hoy } }),
     prisma.producto.findMany({ where: { activo: true } }),
     prisma.gasto.findMany({ where: { fecha: { gte: hoy, lt: manana } } }),
+    prisma.configFinanciero.findFirst(),
   ]);
 
   const totalXbox = sesionesXboxHoy.reduce((a, s) => a + Number(s.total), 0);
@@ -107,6 +109,7 @@ export async function getPanelDia() {
         : null,
     })),
 
+    capitalFinanciero: configFinanciero ? Number(configFinanciero.capitalTotal) : null,
     tieneAperturaFinanciero: !!aperturaFinanciero,
     tieneCierreFinanciero: !!cierreFinanciero,
     efectivoEmpleadaCalculado,

@@ -1,6 +1,7 @@
 "use client";
 
 import { cerrarDiaCompleto } from "@/app/actions/panel";
+import { registrarApertura } from "@/app/actions/financiero";
 import { useToast } from "@/components/ui/Toast";
 import { fmt } from "@/lib/financiero";
 import { useRouter } from "next/navigation";
@@ -44,6 +45,7 @@ export type PanelData = {
   gananciaNeta: number;
   pendientesRetiro: number;
   consolas: Consola[];
+  capitalFinanciero: number | null;
   tieneAperturaFinanciero: boolean;
   tieneCierreFinanciero: boolean;
   efectivoEmpleadaCalculado: number | null;
@@ -85,6 +87,8 @@ export function PanelDia({ data, rol }: { data: PanelData; rol: string }) {
   const [modalCierre, setModalCierre] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cargandoApertura, setCargandoApertura] = useState(false);
+  const [errorApertura, setErrorApertura] = useState<string | null>(null);
 
   useEffect(() => {
     if (data.tieneCierreDia) return;
@@ -113,8 +117,33 @@ export function PanelDia({ data, rol }: { data: PanelData; rol: string }) {
     }
   }
 
+  async function handleApertura(efectivoEmpleada: number, saldoTarjetaInicial: number) {
+    setCargandoApertura(true);
+    setErrorApertura(null);
+    try {
+      await registrarApertura({ efectivoEmpleada, saldoTarjetaInicial });
+      router.refresh();
+      toast.success("Apertura del día registrada");
+    } catch (e) {
+      setErrorApertura(e instanceof Error ? e.message : "Ocurrió un error");
+    } finally {
+      setCargandoApertura(false);
+    }
+  }
+
   if (data.tieneCierreDia && data.cierre) {
     return <VistaDeciaCerrado cierre={data.cierre} />;
+  }
+
+  if (!data.tieneAperturaFinanciero) {
+    return (
+      <FormAperturaPanel
+        capital={data.capitalFinanciero}
+        cargando={cargandoApertura}
+        error={errorApertura}
+        onAbrir={handleApertura}
+      />
+    );
   }
 
   const alertas = data.productosStockBajo.length > 0 || data.capitalDesajustado;
@@ -439,6 +468,20 @@ function ModalCierreDia({
           {difCaja !== null && (
             <p className={`text-xs font-medium ${cuadraClass(difCaja)}`}>{cuadraMsg(difCaja)}</p>
           )}
+          {/* Fondo de cambio */}
+          {cajaChicaReal !== "" && cajaNum >= 0 && (
+            <div className="rounded-lg bg-gray-800/40 border border-gray-700/50 px-3 py-2 text-xs space-y-1">
+              <div className="flex justify-between text-gray-400">
+                <span>Caja chica</span><span>${fmt(cajaNum)}</span>
+              </div>
+              <div className="flex justify-between text-amber-400/80">
+                <span>Fondo de cambio (se queda en caja)</span><span>−$100</span>
+              </div>
+              <div className="flex justify-between border-t border-gray-700 pt-1 font-semibold text-white">
+                <span>A entregar al dueño</span><span>${fmt(Math.max(0, cajaNum - 100))}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 2. Sobrante */}
@@ -625,10 +668,26 @@ function VistaDeciaCerrado({ cierre }: { cierre: CierreResumen }) {
         ))}
       </div>
 
+      {/* Desglose fondo de cambio */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 space-y-1.5 text-sm">
+        <div className="flex justify-between text-gray-400">
+          <span>Caja chica física</span>
+          <span>${fmt(cierre.efectivoReal)}</span>
+        </div>
+        <div className="flex justify-between text-amber-400/80">
+          <span>Fondo de cambio (queda en caja)</span>
+          <span>−$100</span>
+        </div>
+        <div className="flex justify-between border-t border-gray-700 pt-1.5 font-semibold text-white">
+          <span>A entregar al dueño</span>
+          <span>${fmt(Math.max(0, cierre.efectivoReal - 100))}</span>
+        </div>
+      </div>
+
       {/* Las 3 cuentas confirmadas */}
       <CuentaRow
         numero={1}
-        label="Caja chica física entregada"
+        label="Caja chica física contada"
         entregado={cierre.efectivoReal}
         esperado={cierre.efectivoEsperado}
         diferencia={cierre.diferencia}
@@ -655,6 +714,84 @@ function VistaDeciaCerrado({ cierre }: { cierre: CierreResumen }) {
             : null
         }
       />
+    </div>
+  );
+}
+
+// ─── Formulario de apertura del día ──────────────────────────────────────────
+
+function FormAperturaPanel({
+  capital,
+  cargando,
+  error,
+  onAbrir,
+}: {
+  capital: number | null;
+  cargando: boolean;
+  error: string | null;
+  onAbrir: (efectivoEmpleada: number, saldoTarjetaInicial: number) => void;
+}) {
+  const [efectivo, setEfectivo] = useState("");
+  const [tarjeta, setTarjeta] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+
+  const efectivoNum = parseFloat(efectivo) || 0;
+  const tarjetaNum = parseFloat(tarjeta) || 0;
+  const cajaAzul = capital !== null ? capital - tarjetaNum : Infinity;
+  const valido = efectivoNum >= 0 && tarjetaNum > 0 &&
+    (capital === null || tarjetaNum < capital) &&
+    efectivoNum <= cajaAzul;
+
+  return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="mx-auto w-full max-w-md rounded-2xl border border-gray-800 bg-gray-900 p-8 space-y-6">
+        <div>
+          <p className="text-lg font-bold text-white">Apertura del día</p>
+          <p className="text-sm text-gray-500 mt-0.5">Registra los saldos iniciales para comenzar</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-sm text-gray-400">Saldo inicial de la tarjeta</label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+              <input
+                type="number" min={0} step={100} value={tarjeta}
+                onChange={(e) => setTarjeta(e.target.value)}
+                placeholder="0.00"
+                className="w-full rounded-xl border border-gray-700 bg-gray-800 py-3 pl-9 pr-4 text-xl font-bold text-white focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm text-gray-400">Efectivo en caja</label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-medium">$</span>
+              <input
+                ref={ref}
+                type="number" min={0} step={100} value={efectivo}
+                onChange={(e) => setEfectivo(e.target.value)}
+                placeholder="0.00"
+                className="w-full rounded-xl border border-gray-700 bg-gray-800 py-3 pl-9 pr-4 text-xl font-bold text-white focus:border-brand-500 focus:outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-400 bg-red-950/40 border border-red-800/50 rounded-lg px-3 py-2">{error}</p>
+        )}
+
+        <button
+          onClick={() => valido && onAbrir(efectivoNum, tarjetaNum)}
+          disabled={cargando || !valido}
+          className="w-full rounded-xl bg-brand-600 py-3.5 text-base font-bold text-white hover:bg-brand-500 disabled:opacity-40 transition"
+        >
+          {cargando ? "Registrando..." : "Abrir turno"}
+        </button>
+      </div>
     </div>
   );
 }
