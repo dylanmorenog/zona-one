@@ -207,7 +207,7 @@ export function PanelDia({ data, rol }: { data: PanelData; rol: string }) {
       {data.tieneAperturaFinanciero && data.efectivoEmpleadaCalculado !== null && (
         <div className="flex items-center gap-4 rounded-xl border border-gray-800 bg-gray-900 px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-500">Efectivo empleada</span>
+            <span className="text-xs text-gray-500">Efectivo en caja</span>
             <span className="text-sm font-semibold text-white">
               ${fmt(data.efectivoEmpleadaCalculado)}
             </span>
