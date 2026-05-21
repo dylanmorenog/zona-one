@@ -2,6 +2,7 @@
 
 import {
   actualizarCapital,
+  agregarEfectivoEmpleada,
   cancelarMovimiento,
   confirmarRetiro,
   editarMovimiento,
@@ -55,6 +56,7 @@ export interface EstadoFinanciero {
     diferencia: number;
   } | null;
   movimientos: Movimiento[];
+  efectivosExtra: { id: number; hora: string; monto: number; notas: string | null }[];
   rol: string;
 }
 
@@ -67,6 +69,7 @@ export function FinancieroPanel(props: EstadoFinanciero) {
   const [error, setError] = useState<string | null>(null);
   const [modalEditar, setModalEditar] = useState<Movimiento | null>(null);
   const [confirmarCancelar, setConfirmarCancelar] = useState<number | null>(null);
+  const [modalEfectivoExtra, setModalEfectivoExtra] = useState(false);
 
   const esDueno = props.rol === "DUENO";
 
@@ -135,17 +138,30 @@ export function FinancieroPanel(props: EstadoFinanciero) {
         onEditar={setModalEditar}
         onCancelar={setConfirmarCancelar}
         onReiniciar={() => ejecutar("reset", () => resetearDia())}
+        onAgregarEfectivo={() => setModalEfectivoExtra(true)}
         movimientoHoy={hoy}
       />
 
+      {modalEfectivoExtra && (
+        <ModalEfectivoExtra
+          cargando={!!cargando}
+          onGuardar={(monto, notas) =>
+            ejecutar("efectivo-extra", async () => {
+              await agregarEfectivoEmpleada({ monto, notas });
+              setModalEfectivoExtra(false);
+            }, "Efectivo agregado")
+          }
+          onCancelar={() => setModalEfectivoExtra(false)}
+        />
+      )}
 
       {modalEditar && (
         <ModalEditar
           mov={modalEditar}
           cargando={!!cargando}
-          onGuardar={(monto, notas) =>
+          onGuardar={(monto, notas, tipoComision) =>
             ejecutar(`editar-${modalEditar.id}`, async () => {
-              await editarMovimiento(modalEditar.id, { monto, notas });
+              await editarMovimiento(modalEditar.id, { monto, notas, tipoComision });
               setModalEditar(null);
             })
           }
@@ -273,6 +289,7 @@ function PanelOperaciones({
   onEditar,
   onCancelar,
   onReiniciar,
+  onAgregarEfectivo,
   movimientoHoy,
 }: {
   props: EstadoFinanciero;
@@ -284,6 +301,7 @@ function PanelOperaciones({
   onEditar: (m: Movimiento) => void;
   onCancelar: (id: number) => void;
   onReiniciar: () => void;
+  onAgregarEfectivo: () => void;
   movimientoHoy: string;
 }) {
   return (
@@ -303,6 +321,33 @@ function PanelOperaciones({
             cargando={cargando === "nueva"}
             onRegistrar={onRegistrar}
           />
+          <button
+            onClick={onAgregarEfectivo}
+            disabled={!!cargando}
+            className="w-full rounded-xl border border-dashed border-emerald-700/50 bg-emerald-950/10 py-2.5 text-sm font-medium text-emerald-400 hover:bg-emerald-950/30 transition disabled:opacity-40"
+          >
+            + Agregar efectivo a la empleada
+          </button>
+          {props.efectivosExtra.length > 0 && (
+            <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 px-3 py-2 border-b border-gray-800">
+                Efectivo extra hoy
+              </p>
+              <div className="divide-y divide-gray-800/40">
+                {props.efectivosExtra.map((e) => (
+                  <div key={e.id} className="flex items-center justify-between px-3 py-2">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-300">+${fmt(e.monto)}</p>
+                      {e.notas && <p className="text-xs text-gray-500">{e.notas}</p>}
+                    </div>
+                    <p className="text-xs text-gray-600">
+                      {new Date(e.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Historial */}
@@ -758,18 +803,29 @@ function ModalEditar({
 }: {
   mov: Movimiento;
   cargando: boolean;
-  onGuardar: (monto: number, notas?: string) => void;
+  onGuardar: (monto: number, notas?: string, tipoComision?: TipoComision) => void;
   onCancelar: () => void;
 }) {
   const [monto, setMonto] = useState(String(mov.monto));
   const [notas, setNotas] = useState(mov.notas ?? "");
+  const [tipoComision, setTipoComision] = useState<TipoComision>(mov.tipoComision);
   const montoNum = parseFloat(monto) || 0;
   const comision = montoNum > 0 ? calcularComision(montoNum) : 0;
+
+  const opcionesComision: { value: TipoComision; label: string }[] =
+    mov.tipo === "RETIRO"
+      ? [
+          { value: "EFECTIVO", label: "Comisión en efectivo" },
+          { value: "TRANSFERENCIA", label: "Comisión en transferencia" },
+        ]
+      : [{ value: "DESCONTADA", label: "Comisión descontada" }];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl space-y-4">
-        <h2 className="text-base font-semibold text-white">Editar operación</h2>
+        <h2 className="text-base font-semibold text-white">
+          Editar {mov.tipo === "RETIRO" ? "retiro" : "depósito"}
+        </h2>
 
         <div>
           <label className="mb-1.5 block text-sm text-gray-400">Monto</label>
@@ -788,6 +844,26 @@ function ModalEditar({
         </div>
 
         <div>
+          <label className="mb-1.5 block text-sm text-gray-400">Tipo de comisión</label>
+          <div className="space-y-1.5">
+            {opcionesComision.map((op) => (
+              <button
+                key={op.value}
+                type="button"
+                onClick={() => setTipoComision(op.value)}
+                className={`w-full rounded-lg border px-3 py-2 text-sm text-left transition
+                  ${tipoComision === op.value
+                    ? "border-brand-500 bg-brand-950/30 text-white"
+                    : "border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600"
+                  }`}
+              >
+                {op.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
           <label className="mb-1.5 block text-sm text-gray-400">Notas</label>
           <input
             type="text" value={notas} onChange={(e) => setNotas(e.target.value)}
@@ -802,10 +878,72 @@ function ModalEditar({
             Cancelar
           </button>
           <button
-            onClick={() => montoNum > 0 && onGuardar(montoNum, notas.trim() || undefined)}
+            onClick={() => montoNum > 0 && onGuardar(montoNum, notas.trim() || undefined, tipoComision)}
             disabled={cargando || montoNum <= 0}
             className="flex-1 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40">
             {cargando ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal agregar efectivo extra ─────────────────────────────────────────────
+
+function ModalEfectivoExtra({
+  cargando,
+  onGuardar,
+  onCancelar,
+}: {
+  cargando: boolean;
+  onGuardar: (monto: number, notas?: string) => void;
+  onCancelar: () => void;
+}) {
+  const [monto, setMonto] = useState("");
+  const [notas, setNotas] = useState("");
+  const montoNum = parseFloat(monto) || 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-white">Agregar efectivo</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Se sumará al efectivo disponible de la empleada</p>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm text-gray-400">Monto</label>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+            <input
+              type="number" min={0} step={100} value={monto}
+              onChange={(e) => setMonto(e.target.value)} autoFocus
+              placeholder="0.00"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2.5 pl-7 pr-3 text-lg font-bold text-white focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm text-gray-400">Notas (opcional)</label>
+          <input
+            type="text" value={notas} onChange={(e) => setNotas(e.target.value)}
+            placeholder="Motivo..."
+            className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+          />
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button onClick={onCancelar} disabled={cargando}
+            className="flex-1 rounded-lg border border-gray-700 py-2.5 text-sm text-gray-400 hover:bg-gray-800 disabled:opacity-50">
+            Cancelar
+          </button>
+          <button
+            onClick={() => montoNum > 0 && onGuardar(montoNum, notas.trim() || undefined)}
+            disabled={cargando || montoNum <= 0}
+            className="flex-1 rounded-lg bg-emerald-700 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-40">
+            {cargando ? "Guardando..." : "Agregar"}
           </button>
         </div>
       </div>

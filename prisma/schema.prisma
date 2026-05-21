@@ -32,6 +32,7 @@ model Usuario {
   movimientosFinanciero  MovimientoFinanciero[]
   cierresFinanciero      CierreFinanciero[]
   gastos                 Gasto[]
+  efectivosExtra         EfectivoExtra[]
 
   @@map("usuarios")
 }
@@ -315,4 +316,16 @@ model CierreFinanciero {
   creadoEn             DateTime @default(now()) @map("creado_en")
 
   @@map("cierres_financiero")
+}
+
+model EfectivoExtra {
+  id         Int      @id @default(autoincrement())
+  fecha      DateTime @db.Date
+  hora       DateTime @default(now())
+  monto      Decimal  @db.Decimal(12, 2)
+  notas      String?
+  empleadoId Int      @map("empleado_id")
+  empleado   Usuario  @relation(fields: [empleadoId], references: [id])
+
+  @@map("efectivo_extra")
 }

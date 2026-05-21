@@ -30,7 +30,7 @@ export async function getEstadoFinanciero() {
   const hoy = hoyDate();
   const manana = new Date(hoy.getTime() + 86400000);
 
-  const [config, apertura, movimientos, cierre] = await Promise.all([
+  const [config, apertura, movimientos, cierre, efectivoExtraHoy] = await Promise.all([
     prisma.configFinanciero.findFirst(),
     prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } }),
     prisma.movimientoFinanciero.findMany({
@@ -38,6 +38,10 @@ export async function getEstadoFinanciero() {
       orderBy: { hora: "desc" },
     }),
     prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } }),
+    prisma.efectivoExtra.findMany({
+      where: { fecha: hoy },
+      orderBy: { hora: "desc" },
+    }),
   ]);
 
   const capital = config ? Number(config.capitalTotal) : null;
@@ -63,8 +67,10 @@ export async function getEstadoFinanciero() {
     (m) => m.tipo === "RETIRO" && m.estado === "PENDIENTE"
   ).length;
 
+  const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
+
   const efectivoEmpleada =
-    efectivoEmpleadaInicial !== null ? efectivoEmpleadaInicial + deltaEfectivo : null;
+    efectivoEmpleadaInicial !== null ? efectivoEmpleadaInicial + deltaEfectivo + totalEfectivoExtra : null;
 
   const saldoTarjeta =
     saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjeta : null;
@@ -114,6 +120,12 @@ export async function getEstadoFinanciero() {
       notas: m.notas,
       hora: m.hora.toISOString(),
       confirmadoEn: m.confirmadoEn?.toISOString() ?? null,
+    })),
+    efectivosExtra: efectivoExtraHoy.map((e) => ({
+      id: e.id,
+      hora: e.hora.toISOString(),
+      monto: Number(e.monto),
+      notas: e.notas,
     })),
   };
 }
@@ -289,7 +301,7 @@ export async function cancelarMovimiento(movimientoId: number) {
 
 export async function editarMovimiento(
   movimientoId: number,
-  { monto, notas }: { monto: number; notas?: string }
+  { monto, notas, tipoComision }: { monto: number; notas?: string; tipoComision?: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA" }
 ) {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
@@ -308,7 +320,40 @@ export async function editarMovimiento(
 
   await prisma.movimientoFinanciero.update({
     where: { id: movimientoId },
-    data: { monto, comision: calcularComision(monto), notas: notas?.trim() || null },
+    data: {
+      monto,
+      comision: calcularComision(monto),
+      notas: notas?.trim() || null,
+      ...(tipoComision ? { tipoComision } : {}),
+    },
+  });
+
+  revalidatePath("/dashboard/financiero");
+}
+
+// ─── Agregar efectivo extra a la empleada ─────────────────────────────────────
+
+export async function agregarEfectivoEmpleada({
+  monto,
+  notas,
+}: {
+  monto: number;
+  notas?: string;
+}) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  if (!Number.isFinite(monto) || monto <= 0)
+    throw new Error("El monto debe ser mayor a 0");
+
+  const hoy = hoyDate();
+  if (await prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } })) {
+    throw new Error("El día ya fue cerrado");
+  }
+
+  const empleadoId = await getEmpleadoId(session.rol);
+  await prisma.efectivoExtra.create({
+    data: { fecha: hoy, monto, notas: notas?.trim() || null, empleadoId },
   });
 
   revalidatePath("/dashboard/financiero");
