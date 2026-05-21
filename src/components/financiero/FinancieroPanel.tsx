@@ -110,9 +110,6 @@ export function FinancieroPanel(props: EstadoFinanciero) {
             )
           }
         />
-        {esDueno && (
-          <BotonReiniciar onReiniciar={() => ejecutar("reset", () => resetearDia())} cargando={!!cargando} />
-        )}
       </div>
     );
   }
@@ -121,9 +118,6 @@ export function FinancieroPanel(props: EstadoFinanciero) {
     return (
       <div className="space-y-4">
         <ResumenCierre props={props} />
-        {esDueno && (
-          <BotonReiniciar onReiniciar={() => ejecutar("reset", () => resetearDia())} cargando={!!cargando} />
-        )}
       </div>
     );
   }
@@ -385,12 +379,6 @@ function PanelOperaciones({
             cargando={cargando === "nueva"}
             onRegistrar={onRegistrar}
           />
-          {esDueno && (
-            <BotonReiniciar
-              onReiniciar={onReiniciar}
-              cargando={cargando === "reset"}
-            />
-          )}
         </div>
 
         {/* Historial */}
@@ -1165,19 +1153,6 @@ function ResumenCierre({ props }: { props: EstadoFinanciero }) {
   );
 }
 
-// ─── Botón reiniciar día (pruebas) ────────────────────────────────────────────
-
-function BotonReiniciar({ onReiniciar, cargando }: { onReiniciar: () => void; cargando: boolean }) {
-  return (
-    <button
-      onClick={onReiniciar}
-      disabled={cargando}
-      className="w-full rounded-lg border border-dashed border-gray-800 py-2 text-xs text-gray-700 hover:text-gray-500 hover:border-gray-700 transition disabled:opacity-40"
-    >
-      {cargando ? "Reiniciando..." : "↺ Reiniciar día (prueba)"}
-    </button>
-  );
-}
 
 // ─── Stat card ────────────────────────────────────────────────────────────────
 
