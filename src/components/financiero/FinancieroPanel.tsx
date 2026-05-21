@@ -69,7 +69,6 @@ export function FinancieroPanel(props: EstadoFinanciero) {
   const [error, setError] = useState<string | null>(null);
   const [modalEditar, setModalEditar] = useState<Movimiento | null>(null);
   const [confirmarCancelar, setConfirmarCancelar] = useState<number | null>(null);
-  const [modalEfectivoExtra, setModalEfectivoExtra] = useState(false);
 
   const esDueno = props.rol === "DUENO";
 
@@ -138,22 +137,9 @@ export function FinancieroPanel(props: EstadoFinanciero) {
         onEditar={setModalEditar}
         onCancelar={setConfirmarCancelar}
         onReiniciar={() => ejecutar("reset", () => resetearDia())}
-        onAgregarEfectivo={() => setModalEfectivoExtra(true)}
         movimientoHoy={hoy}
       />
 
-      {modalEfectivoExtra && (
-        <ModalEfectivoExtra
-          cargando={!!cargando}
-          onGuardar={(monto, notas) =>
-            ejecutar("efectivo-extra", async () => {
-              await agregarEfectivoEmpleada({ monto, notas });
-              setModalEfectivoExtra(false);
-            }, "Efectivo agregado")
-          }
-          onCancelar={() => setModalEfectivoExtra(false)}
-        />
-      )}
 
       {modalEditar && (
         <ModalEditar
@@ -227,6 +213,110 @@ function SinConfig({
   );
 }
 
+// ─── Tarjeta efectivo en caja con agregar inline ──────────────────────────────
+
+function EfectivoCajaCard({
+  efectivo,
+  pendientes,
+  efectivosExtra,
+}: {
+  efectivo: number;
+  pendientes: number;
+  efectivosExtra: { id: number; hora: string; monto: number; notas: string | null }[];
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [abierto, setAbierto] = useState(false);
+  const [monto, setMonto] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (abierto) inputRef.current?.focus();
+  }, [abierto]);
+
+  async function confirmar() {
+    const num = parseFloat(monto);
+    if (!num || num <= 0) return;
+    setCargando(true);
+    try {
+      await agregarEfectivoEmpleada({ monto: num });
+      router.refresh();
+      toast.success("Efectivo agregado");
+      setMonto("");
+      setAbierto(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al agregar");
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  const sub = pendientes > 0
+    ? `${pendientes} retiro${pendientes !== 1 ? "s" : ""} pendiente${pendientes !== 1 ? "s" : ""}`
+    : "Disponible para entregar";
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">Efectivo en caja</p>
+        <p className="text-2xl font-bold text-white">${fmt(efectivo)}</p>
+        <p className="mt-0.5 text-xs text-gray-600">{sub}</p>
+      </div>
+
+      {efectivosExtra.length > 0 && (
+        <div className="space-y-1">
+          {efectivosExtra.map((e) => (
+            <div key={e.id} className="flex justify-between text-xs">
+              <span className="text-emerald-400">+${fmt(e.monto)}{e.notas ? ` · ${e.notas}` : ""}</span>
+              <span className="text-gray-600">
+                {new Date(e.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!abierto ? (
+        <button
+          onClick={() => setAbierto(true)}
+          className="w-full rounded-lg border border-dashed border-gray-700 py-1.5 text-xs text-gray-500 hover:text-gray-300 hover:border-gray-600 transition"
+        >
+          + Agregar efectivo
+        </button>
+      ) : (
+        <div className="flex gap-1.5">
+          <div className="relative flex-1">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500 text-xs">$</span>
+            <input
+              ref={inputRef}
+              type="number" min={0} step={100} value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") confirmar(); if (e.key === "Escape") { setAbierto(false); setMonto(""); } }}
+              placeholder="0"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 py-1.5 pl-5 pr-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+            />
+          </div>
+          <button
+            onClick={confirmar}
+            disabled={cargando || !monto || parseFloat(monto) <= 0}
+            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-40 transition"
+          >
+            {cargando ? "..." : "✓"}
+          </button>
+          <button
+            onClick={() => { setAbierto(false); setMonto(""); }}
+            disabled={cargando}
+            className="rounded-lg border border-gray-700 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-800 disabled:opacity-40"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Stats con detalles colapsables ──────────────────────────────────────────
 
 function StatsFinanciero({ props }: { props: EstadoFinanciero }) {
@@ -235,11 +325,10 @@ function StatsFinanciero({ props }: { props: EstadoFinanciero }) {
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-3">
-        <StatCard
-          label="Efectivo en caja"
-          value={`$${fmt(props.efectivoEmpleada!)}`}
-          sub={props.pendientes > 0 ? `${props.pendientes} retiro${props.pendientes > 1 ? "s" : ""} pendiente${props.pendientes > 1 ? "s" : ""}` : "Disponible para entregar"}
-          color="white"
+        <EfectivoCajaCard
+          efectivo={props.efectivoEmpleada!}
+          pendientes={props.pendientes}
+          efectivosExtra={props.efectivosExtra}
         />
         <StatCard
           label="Tarjeta (esperado)"
@@ -289,7 +378,6 @@ function PanelOperaciones({
   onEditar,
   onCancelar,
   onReiniciar,
-  onAgregarEfectivo,
   movimientoHoy,
 }: {
   props: EstadoFinanciero;
@@ -301,7 +389,6 @@ function PanelOperaciones({
   onEditar: (m: Movimiento) => void;
   onCancelar: (id: number) => void;
   onReiniciar: () => void;
-  onAgregarEfectivo: () => void;
   movimientoHoy: string;
 }) {
   return (
@@ -321,33 +408,6 @@ function PanelOperaciones({
             cargando={cargando === "nueva"}
             onRegistrar={onRegistrar}
           />
-          <button
-            onClick={onAgregarEfectivo}
-            disabled={!!cargando}
-            className="w-full rounded-xl border border-dashed border-emerald-700/50 bg-emerald-950/10 py-2.5 text-sm font-medium text-emerald-400 hover:bg-emerald-950/30 transition disabled:opacity-40"
-          >
-            + Agregar efectivo a la empleada
-          </button>
-          {props.efectivosExtra.length > 0 && (
-            <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 px-3 py-2 border-b border-gray-800">
-                Efectivo extra hoy
-              </p>
-              <div className="divide-y divide-gray-800/40">
-                {props.efectivosExtra.map((e) => (
-                  <div key={e.id} className="flex items-center justify-between px-3 py-2">
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-300">+${fmt(e.monto)}</p>
-                      {e.notas && <p className="text-xs text-gray-500">{e.notas}</p>}
-                    </div>
-                    <p className="text-xs text-gray-600">
-                      {new Date(e.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Historial */}
