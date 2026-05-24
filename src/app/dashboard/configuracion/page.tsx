@@ -6,6 +6,7 @@ import {
   getConfigFinanciero,
   getCategoriasGasto,
   getCategoriasProducto,
+  getCategoriasDefaultDeshabilitadas,
 } from "@/app/actions/configuracion";
 import { ConfiguracionPanel } from "@/components/configuracion/ConfiguracionPanel";
 import { redirect } from "next/navigation";
@@ -14,7 +15,7 @@ export default async function ConfiguracionPage() {
   const session = await getSession();
   if (session?.rol !== "DUENO") redirect("/dashboard");
 
-  const [{ config: configXbox, consolas }, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto] =
+  const [{ config: configXbox, consolas }, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto, categoriasDefaultDeshabilitadas] =
     await Promise.all([
       getConfigXbox(),
       getServicios(),
@@ -22,6 +23,7 @@ export default async function ConfiguracionPage() {
       getConfigFinanciero(),
       getCategoriasGasto(),
       getCategoriasProducto(),
+      getCategoriasDefaultDeshabilitadas(),
     ]);
 
   return (
@@ -39,6 +41,7 @@ export default async function ConfiguracionPage() {
           configFinanciero={configFinanciero}
           categoriasGasto={categoriasGasto}
           categoriasProducto={categoriasProducto}
+          categoriasDefaultDeshabilitadas={categoriasDefaultDeshabilitadas}
         />
       </div>
     </div>

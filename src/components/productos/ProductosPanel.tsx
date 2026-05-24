@@ -5,6 +5,7 @@ import {
   registrarEntradaMercancia,
   registrarVentaProducto,
   toggleActivoProducto,
+  eliminarProducto,
 } from "@/app/actions/productos";
 import { useToast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
@@ -66,6 +67,7 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
   const [modalVenta, setModalVenta] = useState<Producto | null>(null);
   const [modalEntrada, setModalEntrada] = useState<Producto | null>(null);
   const [modalProducto, setModalProducto] = useState<Producto | "nuevo" | null>(null);
+  const [confirmEliminar, setConfirmEliminar] = useState<Producto | null>(null);
 
   const esDueno = rol === "DUENO";
 
@@ -87,21 +89,19 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
 
   return (
     <div className="flex flex-col h-full gap-4">
-      {esDueno && (
-        <div className="flex gap-1 rounded-xl border border-gray-800 bg-gray-900 p-1 w-fit">
-          {(["venta", "inventario"] as Vista[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setVista(v)}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
-                vista === v ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
-              }`}
-            >
-              {v === "venta" ? "Venta" : "Inventario"}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="flex gap-1 rounded-xl border border-gray-800 bg-gray-900 p-1 w-fit">
+        {(["venta", "inventario"] as Vista[]).map((v) => (
+          <button
+            key={v}
+            onClick={() => setVista(v)}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
+              vista === v ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            {v === "venta" ? "Venta" : "Inventario"}
+          </button>
+        ))}
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-3 text-sm text-red-400">
@@ -118,13 +118,15 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
         />
       )}
 
-      {vista === "inventario" && esDueno && (
+      {vista === "inventario" && (
         <VistaInventario
           productos={productos}
+          esDueno={esDueno}
           onEntrada={setModalEntrada}
-          onEditar={setModalProducto}
-          onToggleActivo={(p) => ejecutar(() => toggleActivoProducto(p.id))}
-          onNuevo={() => setModalProducto("nuevo")}
+          onEditar={(p) => setModalProducto(p)}
+          onToggleActivo={esDueno ? (p) => ejecutar(() => toggleActivoProducto(p.id)) : undefined}
+          onNuevo={esDueno ? () => setModalProducto("nuevo") : undefined}
+          onEliminar={setConfirmEliminar}
           cargando={cargando}
         />
       )}
@@ -160,6 +162,7 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
       {modalProducto && (
         <ModalProducto
           producto={modalProducto === "nuevo" ? null : modalProducto}
+          esDueno={esDueno}
           cargando={cargando}
           onGuardar={(id, data) =>
             ejecutar(async () => {
@@ -168,6 +171,20 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
             })
           }
           onCancelar={() => setModalProducto(null)}
+        />
+      )}
+
+      {confirmEliminar && (
+        <ModalConfirmEliminar
+          producto={confirmEliminar}
+          cargando={cargando}
+          onConfirmar={() =>
+            ejecutar(async () => {
+              await eliminarProducto(confirmEliminar.id);
+              setConfirmEliminar(null);
+            }, "Producto eliminado")
+          }
+          onCancelar={() => setConfirmEliminar(null)}
         />
       )}
     </div>
@@ -362,20 +379,28 @@ function VistaVenta({
 
 function VistaInventario({
   productos,
+  esDueno,
   onEntrada,
   onEditar,
   onToggleActivo,
   onNuevo,
+  onEliminar,
   cargando,
 }: {
   productos: Producto[];
+  esDueno: boolean;
   onEntrada: (p: Producto) => void;
   onEditar: (p: Producto) => void;
-  onToggleActivo: (p: Producto) => void;
-  onNuevo: () => void;
+  onToggleActivo?: (p: Producto) => void;
+  onNuevo?: () => void;
+  onEliminar: (p: Producto) => void;
   cargando: boolean;
 }) {
   const bajoMinimo = productos.filter((p) => p.activo && p.stockActual <= p.stockMinimo);
+
+  const colsDueno = "grid-cols-[1fr_70px_60px_80px_80px_80px_180px]";
+  const colsEmpleado = "grid-cols-[1fr_70px_60px_80px_140px]";
+  const cols = esDueno ? colsDueno : colsEmpleado;
 
   return (
     <div className="flex flex-col gap-4 flex-1 min-h-0">
@@ -395,26 +420,28 @@ function VistaInventario({
           {productos.filter((p) => p.activo).length} activos ·{" "}
           {productos.filter((p) => !p.activo).length} inactivos
         </p>
-        <button
-          onClick={onNuevo}
-          className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Agregar producto
-        </button>
+        {esDueno && onNuevo && (
+          <button
+            onClick={onNuevo}
+            className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Agregar producto
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto rounded-xl border border-gray-800 bg-gray-900">
         <div className="divide-y divide-gray-800/60">
-          <div className="grid grid-cols-[1fr_70px_60px_80px_80px_80px_160px] gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-600">
+          <div className={`grid ${cols} gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-gray-600`}>
             <span>Producto</span>
             <span className="text-center">Stock</span>
             <span className="text-center">Mín</span>
             <span className="text-right">P. Venta</span>
-            <span className="text-right">P. Costo</span>
-            <span className="text-right">Ganancia</span>
+            {esDueno && <span className="text-right">P. Costo</span>}
+            {esDueno && <span className="text-right">Ganancia</span>}
             <span />
           </div>
 
@@ -428,9 +455,7 @@ function VistaInventario({
             return (
               <div
                 key={p.id}
-                className={`grid grid-cols-[1fr_70px_60px_80px_80px_80px_160px] gap-3 items-center px-4 py-3 ${
-                  !p.activo ? "opacity-40" : ""
-                }`}
+                className={`grid ${cols} gap-3 items-center px-4 py-3 ${!p.activo ? "opacity-40" : ""}`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${cfg.badge}`}>
@@ -445,11 +470,15 @@ function VistaInventario({
                 </div>
                 <div className="text-center text-sm text-gray-500">{p.stockMinimo}</div>
                 <div className="text-right text-sm text-white">${p.precioVenta.toFixed(0)}</div>
-                <div className="text-right text-sm text-gray-400">${p.precioCosto.toFixed(2)}</div>
-                <div className="text-right">
-                  <p className="text-sm text-emerald-400">${ganancia.toFixed(0)}</p>
-                  <p className="text-xs text-gray-600">{margen}%</p>
-                </div>
+                {esDueno && (
+                  <div className="text-right text-sm text-gray-400">${p.precioCosto.toFixed(2)}</div>
+                )}
+                {esDueno && (
+                  <div className="text-right">
+                    <p className="text-sm text-emerald-400">${ganancia.toFixed(0)}</p>
+                    <p className="text-xs text-gray-600">{margen}%</p>
+                  </div>
+                )}
                 <div className="flex items-center justify-end gap-1.5">
                   <button
                     onClick={() => onEntrada(p)}
@@ -465,16 +494,25 @@ function VistaInventario({
                   >
                     Editar
                   </button>
+                  {esDueno && onToggleActivo && (
+                    <button
+                      onClick={() => onToggleActivo(p)}
+                      disabled={cargando}
+                      className={`rounded-md border px-2.5 py-1 text-xs disabled:opacity-40 ${
+                        p.activo
+                          ? "border-red-900/50 bg-red-950/30 text-red-400 hover:bg-red-950/50"
+                          : "border-emerald-900/50 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-950/50"
+                      }`}
+                    >
+                      {p.activo ? "Off" : "On"}
+                    </button>
+                  )}
                   <button
-                    onClick={() => onToggleActivo(p)}
+                    onClick={() => onEliminar(p)}
                     disabled={cargando}
-                    className={`rounded-md border px-2.5 py-1 text-xs disabled:opacity-40 ${
-                      p.activo
-                        ? "border-red-900/50 bg-red-950/30 text-red-400 hover:bg-red-950/50"
-                        : "border-emerald-900/50 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-950/50"
-                    }`}
+                    className="rounded-md border border-red-900/50 bg-red-950/20 px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-40"
                   >
-                    {p.activo ? "Off" : "On"}
+                    Eliminar
                   </button>
                 </div>
               </div>
@@ -665,11 +703,13 @@ function ModalEntrada({
 
 function ModalProducto({
   producto,
+  esDueno,
   cargando,
   onGuardar,
   onCancelar,
 }: {
   producto: Producto | null;
+  esDueno: boolean;
   cargando: boolean;
   onGuardar: (
     id: number | null,
@@ -692,9 +732,10 @@ function ModalProducto({
   const [stockInicial, setStockInicial] = useState("0");
 
   const esNuevo = !producto;
-  const valido = nombre.trim() !== "" && parseFloat(precioVenta) > 0;
+  const precioCostoValido = !esDueno || (precioCosto !== "" && parseFloat(precioCosto) > 0);
+  const valido = nombre.trim() !== "" && parseFloat(precioVenta) > 0 && precioCostoValido;
   const gananciaPreview =
-    parseFloat(precioVenta) > 0 && parseFloat(precioCosto) >= 0
+    esDueno && parseFloat(precioVenta) > 0 && parseFloat(precioCosto) > 0
       ? parseFloat(precioVenta) - parseFloat(precioCosto)
       : null;
 
@@ -730,9 +771,9 @@ function ModalProducto({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid gap-3 ${esDueno ? "grid-cols-2" : "grid-cols-1"}`}>
             <div>
-              <label className="mb-1 block text-sm text-gray-400">Precio venta</label>
+              <label className="mb-1 block text-sm text-gray-400">Precio venta *</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">$</span>
                 <input
@@ -742,17 +783,19 @@ function ModalProducto({
                 />
               </div>
             </div>
-            <div>
-              <label className="mb-1 block text-sm text-gray-400">Precio costo</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">$</span>
-                <input
-                  type="number" min={0} step={0.5} value={precioCosto}
-                  onChange={(e) => setPrecioCosto(e.target.value)}
-                  className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-6 pr-3 text-sm text-white focus:border-brand-500 focus:outline-none"
-                />
+            {esDueno && (
+              <div>
+                <label className="mb-1 block text-sm text-gray-400">Precio costo *</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">$</span>
+                  <input
+                    type="number" min={0} step={0.5} value={precioCosto}
+                    onChange={(e) => setPrecioCosto(e.target.value)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-6 pr-3 text-sm text-white focus:border-brand-500 focus:outline-none"
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -815,6 +858,53 @@ function ModalProducto({
             className="flex-1 rounded-lg bg-brand-600 py-2.5 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-40"
           >
             {cargando ? "..." : esNuevo ? "Agregar" : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal Confirmar Eliminar ─────────────────────────────────────────────────
+
+function ModalConfirmEliminar({
+  producto,
+  cargando,
+  onConfirmar,
+  onCancelar,
+}: {
+  producto: Producto;
+  cargando: boolean;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancelar}>
+      <div
+        className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-2 text-base font-semibold text-white">¿Eliminar producto?</h2>
+        <p className="mb-1 text-sm text-gray-400">
+          Se eliminará <span className="text-white">{producto.nombre}</span> permanentemente.
+        </p>
+        <p className="mb-5 text-xs text-gray-600">
+          Solo es posible si no tiene ventas registradas.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={onCancelar}
+            disabled={cargando}
+            className="flex-1 rounded-lg border border-gray-700 py-2.5 text-sm font-medium text-gray-400 hover:bg-gray-800 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirmar}
+            disabled={cargando}
+            className="flex-1 rounded-lg bg-red-700 py-2.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-40"
+          >
+            {cargando ? "..." : "Eliminar"}
           </button>
         </div>
       </div>

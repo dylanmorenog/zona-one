@@ -132,9 +132,11 @@ export async function createProducto(data: {
   precioVenta: number;
   precioCosto: number;
   stockMinimo: number;
+  stockInicial?: number;
 }) {
   await requireDueno();
-  await prisma.producto.create({ data });
+  const { stockInicial, ...rest } = data;
+  await prisma.producto.create({ data: { ...rest, stockActual: stockInicial ?? 0 } });
   revalidatePath("/dashboard/configuracion");
   revalidatePath("/dashboard/productos");
 }
@@ -218,6 +220,38 @@ export async function updateCategoriaProducto(id: number, nombre: string) {
   if (!trimmed) throw new Error("El nombre no puede estar vacío");
   await prisma.categoriaProductoConfig.update({ where: { id }, data: { nombre: trimmed } });
   revalidatePath("/dashboard/configuracion");
+}
+
+const CATEGORIAS_DEFAULT_KEYS = ["DULCES", "FRITURAS", "PAPELERIA", "BEBIDAS"] as const;
+
+export async function getCategoriasDefaultDeshabilitadas(): Promise<string[]> {
+  const rows = await prisma.categoriaProductoConfig.findMany({
+    where: { nombre: { in: [...CATEGORIAS_DEFAULT_KEYS] }, activa: false },
+  });
+  return rows.map(r => r.nombre);
+}
+
+export async function deshabilitarCategoriaDefault(
+  categoria: string,
+  reasignarA: { categoria: CategoriaProductoEnum; categoriaExtra: string | null } | null
+) {
+  await requireDueno();
+  if (!CATEGORIAS_DEFAULT_KEYS.includes(categoria as typeof CATEGORIAS_DEFAULT_KEYS[number])) {
+    throw new Error("Categoría no válida");
+  }
+  await prisma.producto.updateMany({
+    where: { categoria: categoria as CategoriaProductoEnum },
+    data: reasignarA
+      ? { categoria: reasignarA.categoria, categoriaExtra: reasignarA.categoriaExtra }
+      : { categoria: "OTRO", categoriaExtra: null },
+  });
+  await prisma.categoriaProductoConfig.upsert({
+    where: { nombre: categoria },
+    create: { nombre: categoria, activa: false },
+    update: { activa: false },
+  });
+  revalidatePath("/dashboard/configuracion");
+  revalidatePath("/dashboard/productos");
 }
 
 // ─── Financiero ───────────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
   deleteCategoriaProducto,
   deleteCategoriaProductoConReasignacion,
   updateCategoriaProducto,
+  deshabilitarCategoriaDefault,
 } from "@/app/actions/configuracion";
 import { fmt } from "@/lib/financiero";
 
@@ -53,6 +54,7 @@ interface Props {
   configFinanciero: { id: number; capitalTotal: number } | null;
   categoriasGasto: CategoriaGasto[];
   categoriasProducto: CategoriaProductoCustom[];
+  categoriasDefaultDeshabilitadas: string[];
 }
 
 // ─── Componentes utilitarios ──────────────────────────────────────────────────
@@ -371,20 +373,23 @@ type ConfirmDelete = { id: number; nombre: string; tieneVentas: boolean } | null
 function SeccionProductos({
   productos,
   categoriasProducto: initialCatsCustom,
+  categoriasDefaultDeshabilitadas: initialCatsDefaultDes,
 }: {
   productos: Producto[];
   categoriasProducto: CategoriaProductoCustom[];
+  categoriasDefaultDeshabilitadas: string[];
 }) {
   const [pending, startT] = useTransition();
   const [modo, setModo] = useState<ModoProducto>(null);
   const [confirmDelete, setConfirmDelete] = useState<ConfirmDelete>(null);
   const [catsCustom, setCatsCustom] = useState(initialCatsCustom);
+  const [catsDefaultDes, setCatsDefaultDes] = useState<string[]>(initialCatsDefaultDes);
   const [nuevaCat, setNuevaCat] = useState("");
   const [mostrarFormCat, setMostrarFormCat] = useState(false);
   const [errorCat, setErrorCat] = useState<string | null>(null);
   const [editandoCatId, setEditandoCatId] = useState<number | null>(null);
   const [editandoCatNombre, setEditandoCatNombre] = useState("");
-  const [confirmDeleteCat, setConfirmDeleteCat] = useState<{ id: number; nombre: string; productCount: number } | null>(null);
+  const [confirmDeleteCat, setConfirmDeleteCat] = useState<{ id: number | null; nombre: string; productCount: number; esDefault: boolean } | null>(null);
   const [reasignarCatVal, setReasignarCatVal] = useState<"sin_categoria" | ValorCategoria>("sin_categoria");
 
   // Campos del formulario de producto
@@ -393,10 +398,13 @@ function SeccionProductos({
   const [precioVenta, setPrecioVenta] = useState("");
   const [precioCosto, setPrecioCosto] = useState("");
   const [stockMin, setStockMin] = useState("5");
+  const [stockInicial, setStockInicial] = useState("0");
   const [error, setError] = useState<string | null>(null);
 
   // Filtro de lista
   const [filtro, setFiltro] = useState<"TODOS" | ValorCategoria>("TODOS");
+
+  const catsEnumVisibles = CATS_ENUM.filter(c => !catsDefaultDes.includes(c));
 
   function valorCatDeProducto(p: Producto): ValorCategoria {
     if (p.categoriaExtra) return `CUSTOM:${p.categoriaExtra}`;
@@ -404,7 +412,7 @@ function SeccionProductos({
   }
 
   function abrirNuevo() {
-    setNombre(""); setValorCat("DULCES"); setPrecioVenta(""); setPrecioCosto(""); setStockMin("5"); setError(null);
+    setNombre(""); setValorCat("DULCES"); setPrecioVenta(""); setPrecioCosto(""); setStockMin("5"); setStockInicial("0"); setError(null);
     setModo({ tipo: "nuevo" });
   }
 
@@ -423,10 +431,10 @@ function SeccionProductos({
   }
 
   function guardar() {
-    const pv = parseFloat(precioVenta), pc = parseFloat(precioCosto), sm = parseInt(stockMin);
+    const pv = parseFloat(precioVenta), pc = parseFloat(precioCosto), sm = parseInt(stockMin), si = parseInt(stockInicial);
     if (!nombre.trim()) { setError("El nombre es requerido"); return; }
     if (isNaN(pv) || pv <= 0) { setError("El precio de venta debe ser mayor a 0"); return; }
-    if (isNaN(pc) || pc < 0) { setError("El precio de costo no puede ser negativo"); return; }
+    if (isNaN(pc) || pc <= 0) { setError("El precio de costo es obligatorio y debe ser mayor a 0"); return; }
     if (isNaN(sm) || sm < 0) { setError("El stock mínimo no puede ser negativo"); return; }
     setError(null);
     const { categoria, categoriaExtra } = parsearCategoria(valorCat);
@@ -434,7 +442,7 @@ function SeccionProductos({
       try {
         const data = { nombre: nombre.trim(), categoria, categoriaExtra: categoriaExtra ?? undefined, precioVenta: pv, precioCosto: pc, stockMinimo: sm };
         if (modo?.tipo === "nuevo") {
-          await createProducto(data);
+          await createProducto({ ...data, stockInicial: isNaN(si) ? 0 : si });
         } else if (modo?.tipo === "editar") {
           await updateProducto(modo.producto.id, { ...data, categoriaExtra });
         }
@@ -484,18 +492,35 @@ function SeccionProductos({
     const productCount = productos.filter(p => p.categoriaExtra === cat.nombre).length;
     if (productCount > 0) {
       setReasignarCatVal("sin_categoria");
-      setConfirmDeleteCat({ id, nombre: cat.nombre, productCount });
+      setConfirmDeleteCat({ id, nombre: cat.nombre, productCount, esDefault: false });
     } else {
-      eliminarCategoria(id, cat.nombre, null);
+      eliminarCategoriaCustom(id, cat.nombre, null);
     }
   }
 
-  function eliminarCategoria(id: number, nombreOrigen: string, reasignarA: { categoria: CategoriaProducto; categoriaExtra: string | null } | null) {
+  function pedirEliminarCategoriaDefault(cat: CategoriaProducto) {
+    const productCount = productos.filter(p => p.categoria === cat && !p.categoriaExtra).length;
+    setReasignarCatVal("sin_categoria");
+    setConfirmDeleteCat({ id: null, nombre: cat, productCount, esDefault: true });
+  }
+
+  function eliminarCategoriaCustom(id: number, nombreOrigen: string, reasignarA: { categoria: CategoriaProducto; categoriaExtra: string | null } | null) {
     startT(async () => {
       try {
         await deleteCategoriaProductoConReasignacion(id, nombreOrigen, reasignarA);
         setCatsCustom(prev => prev.filter(c => c.id !== id));
         if (filtro === `CUSTOM:${nombreOrigen}`) setFiltro("TODOS");
+        setConfirmDeleteCat(null);
+      } catch (e) { setErrorCat(e instanceof Error ? e.message : "Error"); }
+    });
+  }
+
+  function eliminarCategoriaDefault(cat: string, reasignarA: { categoria: CategoriaProducto; categoriaExtra: string | null } | null) {
+    startT(async () => {
+      try {
+        await deshabilitarCategoriaDefault(cat, reasignarA);
+        setCatsDefaultDes(prev => [...prev, cat]);
+        if (filtro === cat) setFiltro("TODOS");
         setConfirmDeleteCat(null);
       } catch (e) { setErrorCat(e instanceof Error ? e.message : "Error"); }
     });
@@ -512,7 +537,11 @@ function SeccionProductos({
         reasignarA = { categoria: val as CategoriaProducto, categoriaExtra: null };
       }
     }
-    eliminarCategoria(confirmDeleteCat.id, confirmDeleteCat.nombre, reasignarA);
+    if (confirmDeleteCat.esDefault) {
+      eliminarCategoriaDefault(confirmDeleteCat.nombre, reasignarA);
+    } else if (confirmDeleteCat.id !== null) {
+      eliminarCategoriaCustom(confirmDeleteCat.id, confirmDeleteCat.nombre, reasignarA);
+    }
   }
 
   function guardarEdicionCategoria(id: number) {
@@ -535,16 +564,16 @@ function SeccionProductos({
     ? productosActivos
     : productosActivos.filter(p => valorCatDeProducto(p) === filtro);
 
-  // Opciones de categorías para el selector del form
+  // Opciones de categorías para el selector del form (solo visibles)
   const opcionesCategoria: { value: ValorCategoria; label: string }[] = [
-    ...CATS_ENUM.map(c => ({ value: c as ValorCategoria, label: CATEGORIAS_LABELS[c] })),
+    ...catsEnumVisibles.map(c => ({ value: c as ValorCategoria, label: CATEGORIAS_LABELS[c] })),
     ...catsCustom.map(c => ({ value: `CUSTOM:${c.nombre}` as ValorCategoria, label: c.nombre })),
   ];
 
   // Chips de filtro
   const filtroOpciones: { value: "TODOS" | ValorCategoria; label: string }[] = [
     { value: "TODOS", label: "Todos" },
-    ...CATS_ENUM.map(c => ({ value: c as ValorCategoria, label: CATEGORIAS_LABELS[c] })),
+    ...catsEnumVisibles.map(c => ({ value: c as ValorCategoria, label: CATEGORIAS_LABELS[c] })),
     ...catsCustom.map(c => ({ value: `CUSTOM:${c.nombre}` as ValorCategoria, label: c.nombre })),
   ];
 
@@ -553,17 +582,32 @@ function SeccionProductos({
       <div className="p-5 space-y-4">
         {/* Filtro por categoría */}
         <div className="flex gap-2 flex-wrap items-center">
-          {/* Todos + categorías fijas */}
-          {[{ value: "TODOS" as const, label: "Todos" }, ...CATS_ENUM.map(c => ({ value: c as ValorCategoria, label: CATEGORIAS_LABELS[c] }))].map(o => (
-            <button
-              key={o.value}
-              onClick={() => setFiltro(o.value)}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                filtro === o.value ? "bg-brand-600 text-white" : "bg-gray-800 text-gray-500 hover:text-gray-200"
+          {/* Chip "Todos" */}
+          <button
+            onClick={() => setFiltro("TODOS")}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+              filtro === "TODOS" ? "bg-brand-600 text-white" : "bg-gray-800 text-gray-500 hover:text-gray-200"
+            }`}
+          >
+            Todos
+          </button>
+
+          {/* Categorías default visibles con botón eliminar */}
+          {catsEnumVisibles.map(c => (
+            <div
+              key={c}
+              className={`group flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                filtro === c ? "bg-brand-600 text-white" : "bg-gray-800 text-gray-500 hover:text-gray-200"
               }`}
             >
-              {o.label}
-            </button>
+              <button onClick={() => setFiltro(c)} className="leading-none pr-1">{CATEGORIAS_LABELS[c]}</button>
+              <button
+                onClick={() => pedirEliminarCategoriaDefault(c)}
+                disabled={pending}
+                title="Eliminar categoría"
+                className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition leading-none"
+              >✕</button>
+            </div>
           ))}
 
           {/* Categorías personalizadas con editar/eliminar */}
@@ -713,15 +757,20 @@ function SeccionProductos({
                   ))}
                 </select>
               </Campo>
-              <Campo label="Precio de venta">
+              <Campo label="Precio de venta *">
                 <Input type="number" step="0.50" min="0" value={precioVenta} onChange={setPrecioVenta} placeholder="15.00" />
               </Campo>
-              <Campo label="Precio de costo">
+              <Campo label="Precio de costo *">
                 <Input type="number" step="0.50" min="0" value={precioCosto} onChange={setPrecioCosto} placeholder="10.00" />
               </Campo>
               <Campo label="Stock mínimo">
                 <Input type="number" step="1" min="0" value={stockMin} onChange={setStockMin} placeholder="5" />
               </Campo>
+              {modo?.tipo === "nuevo" && (
+                <Campo label="Stock inicial">
+                  <Input type="number" step="1" min="0" value={stockInicial} onChange={setStockInicial} placeholder="0" />
+                </Campo>
+              )}
             </div>
             <ErrorMsg msg={error} />
             <div className="flex gap-2">
@@ -743,27 +792,41 @@ function SeccionProductos({
             <div className="w-full max-w-sm mx-4 rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl p-6 space-y-4">
               <p className="text-sm font-semibold text-white">¿Eliminar categoría?</p>
               <p className="text-sm text-gray-400">
-                <span className="text-white">{confirmDeleteCat.nombre}</span> tiene{" "}
-                <span className="text-white">{confirmDeleteCat.productCount}</span>{" "}
-                producto{confirmDeleteCat.productCount !== 1 ? "s" : ""} asignado{confirmDeleteCat.productCount !== 1 ? "s" : ""}.
-                ¿Qué hacemos con ellos?
+                <span className="text-white">
+                  {confirmDeleteCat.esDefault ? CATEGORIAS_LABELS[confirmDeleteCat.nombre as CategoriaProducto] ?? confirmDeleteCat.nombre : confirmDeleteCat.nombre}
+                </span>{" "}
+                {confirmDeleteCat.productCount > 0 ? (
+                  <>
+                    tiene <span className="text-white">{confirmDeleteCat.productCount}</span>{" "}
+                    producto{confirmDeleteCat.productCount !== 1 ? "s" : ""} asignado{confirmDeleteCat.productCount !== 1 ? "s" : ""}.
+                    ¿Qué hacemos con ellos?
+                  </>
+                ) : (
+                  "no tiene productos asignados. Se eliminará permanentemente."
+                )}
               </p>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1.5">Reasignar a</label>
-                <select
-                  value={reasignarCatVal}
-                  onChange={e => setReasignarCatVal(e.target.value as typeof reasignarCatVal)}
-                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
-                >
-                  <option value="sin_categoria">Sin categoría</option>
-                  {CATS_ENUM.map(c => (
-                    <option key={c} value={c}>{CATEGORIAS_LABELS[c]}</option>
-                  ))}
-                  {catsCustom.filter(c => c.id !== confirmDeleteCat.id).map(c => (
-                    <option key={c.id} value={`CUSTOM:${c.nombre}`}>{c.nombre}</option>
-                  ))}
-                </select>
-              </div>
+              {confirmDeleteCat.productCount > 0 && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1.5">Reasignar a</label>
+                  <select
+                    value={reasignarCatVal}
+                    onChange={e => setReasignarCatVal(e.target.value as typeof reasignarCatVal)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="sin_categoria">Sin categoría (Otro)</option>
+                    {catsEnumVisibles
+                      .filter(c => !confirmDeleteCat.esDefault || c !== confirmDeleteCat.nombre)
+                      .map(c => (
+                        <option key={c} value={c}>{CATEGORIAS_LABELS[c]}</option>
+                      ))}
+                    {catsCustom
+                      .filter(c => confirmDeleteCat.esDefault || c.id !== confirmDeleteCat.id)
+                      .map(c => (
+                        <option key={c.id} value={`CUSTOM:${c.nombre}`}>{c.nombre}</option>
+                      ))}
+                  </select>
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={confirmarEliminarCategoria}
@@ -988,13 +1051,17 @@ function SeccionGastos({ categorias: initialCats }: { categorias: CategoriaGasto
 // ─── Panel principal ──────────────────────────────────────────────────────────
 
 export function ConfiguracionPanel({
-  configXbox, consolas, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto,
+  configXbox, consolas, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto, categoriasDefaultDeshabilitadas,
 }: Props) {
   return (
     <div className="space-y-4 pb-6">
       <SeccionXbox configXbox={configXbox} consolas={consolas} />
       <SeccionServicios servicios={servicios} />
-      <SeccionProductos productos={productos} categoriasProducto={categoriasProducto} />
+      <SeccionProductos
+        productos={productos}
+        categoriasProducto={categoriasProducto}
+        categoriasDefaultDeshabilitadas={categoriasDefaultDeshabilitadas}
+      />
       <SeccionFinanciero configFinanciero={configFinanciero} />
       <SeccionGastos categorias={categoriasGasto} />
     </div>

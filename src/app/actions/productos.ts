@@ -112,7 +112,7 @@ export async function registrarEntradaMercancia({
   cantidad: number;
 }) {
   const session = await getSession();
-  if (session?.rol !== "DUENO") throw new Error("Solo el dueño puede registrar entradas");
+  if (!session) throw new Error("No autorizado");
 
   await prisma.producto.update({
     where: { id: productoId },
@@ -134,20 +134,32 @@ export async function guardarProducto(
   }
 ) {
   const session = await getSession();
-  if (session?.rol !== "DUENO") throw new Error("No autorizado");
+  if (!session) throw new Error("No autorizado");
 
   if (id) {
-    await prisma.producto.update({
-      where: { id },
-      data: {
-        nombre: data.nombre,
-        categoria: data.categoria as "DULCES" | "FRITURAS" | "PAPELERIA" | "BEBIDAS" | "OTRO",
-        precioVenta: data.precioVenta,
-        precioCosto: data.precioCosto,
-        stockMinimo: data.stockMinimo,
-      },
-    });
+    if (session.rol === "DUENO") {
+      await prisma.producto.update({
+        where: { id },
+        data: {
+          nombre: data.nombre,
+          categoria: data.categoria as "DULCES" | "FRITURAS" | "PAPELERIA" | "BEBIDAS" | "OTRO",
+          precioVenta: data.precioVenta,
+          precioCosto: data.precioCosto,
+          stockMinimo: data.stockMinimo,
+        },
+      });
+    } else {
+      await prisma.producto.update({
+        where: { id },
+        data: {
+          nombre: data.nombre,
+          precioVenta: data.precioVenta,
+          stockMinimo: data.stockMinimo,
+        },
+      });
+    }
   } else {
+    if (session.rol !== "DUENO") throw new Error("Solo el dueño puede crear productos");
     await prisma.producto.create({
       data: {
         nombre: data.nombre,
@@ -160,6 +172,17 @@ export async function guardarProducto(
     });
   }
 
+  revalidatePath("/dashboard/productos");
+}
+
+export async function eliminarProducto(id: number) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const count = await prisma.ventaProducto.count({ where: { productoId: id } });
+  if (count > 0) throw new Error("Este producto tiene ventas registradas. Solo puedes desactivarlo.");
+
+  await prisma.producto.delete({ where: { id } });
   revalidatePath("/dashboard/productos");
 }
 
