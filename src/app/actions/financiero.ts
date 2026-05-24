@@ -48,20 +48,27 @@ export async function getEstadoFinanciero() {
   const efectivoEmpleadaInicial = apertura ? Number(apertura.efectivoEmpleada) : null;
   const saldoTarjetaInicial = apertura ? Number(apertura.saldoTarjetaInicial) : null;
 
-  const deltaEfectivo = movimientos.reduce(
+  // Los ingresos directos no afectan el efectivo de la empleada ni la tarjeta;
+  // van directo a la bolsa azul de Guadalupe.
+  const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
+  const deltaEfectivoNormal = movimientosNormales.reduce(
     (a, m) =>
       a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const deltaTarjeta = movimientos.reduce(
+  const deltaTarjetaNormal = movimientosNormales.reduce(
     (a, m) =>
       a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const cajaChicaTotal = movimientos.reduce(
+  const cajaChicaTotal = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)),
     0
   );
+
+  const totalIngresoDirecto = movimientos
+    .filter((m) => m.ingresoDirecto && m.estado === "COMPLETADO")
+    .reduce((a, m) => a + Number(m.monto), 0);
 
   const pendientes = movimientos.filter(
     (m) => m.tipo === "RETIRO" && m.estado === "PENDIENTE"
@@ -70,13 +77,17 @@ export async function getEstadoFinanciero() {
   const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
 
   const efectivoEmpleada =
-    efectivoEmpleadaInicial !== null ? efectivoEmpleadaInicial + deltaEfectivo + totalEfectivoExtra : null;
+    efectivoEmpleadaInicial !== null
+      ? efectivoEmpleadaInicial + deltaEfectivoNormal + totalEfectivoExtra
+      : null;
 
   const saldoTarjeta =
-    saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjeta : null;
+    saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjetaNormal : null;
 
   const cajaAzulTotal =
-    capital !== null && saldoTarjeta !== null ? capital - saldoTarjeta : null;
+    capital !== null && saldoTarjeta !== null
+      ? capital - saldoTarjeta + totalIngresoDirecto
+      : null;
 
   const sumaRetiros = movimientos
     .filter((m) => m.tipo === "RETIRO" && m.estado === "COMPLETADO")
@@ -92,6 +103,7 @@ export async function getEstadoFinanciero() {
     efectivoEmpleada,
     saldoTarjeta,
     cajaAzulTotal,
+    totalIngresoDirecto,
     cajaChicaTotal, // para Panel del Día; no se muestra en este módulo
     pendientes,
     sumaRetiros,
@@ -117,6 +129,8 @@ export async function getEstadoFinanciero() {
       tipoComision: m.tipoComision as "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA",
       monto: Number(m.monto),
       comision: Number(m.comision),
+      sinComision: m.sinComision,
+      ingresoDirecto: m.ingresoDirecto,
       notas: m.notas,
       hora: m.hora.toISOString(),
       confirmadoEn: m.confirmadoEn?.toISOString() ?? null,
@@ -173,12 +187,16 @@ export async function registrarMovimiento({
   pendiente = false,
   monto,
   notas,
+  sinComision = false,
+  ingresoDirecto = false,
 }: {
   tipo: "RETIRO" | "DEPOSITO";
   tipoComision: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA";
   pendiente?: boolean;
   monto: number;
   notas?: string;
+  sinComision?: boolean;
+  ingresoDirecto?: boolean;
 }) {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
@@ -194,21 +212,25 @@ export async function registrarMovimiento({
   if (cierre) throw new Error("El día está cerrado. Las operaciones se registrarán el siguiente turno.");
   if (!apertura) throw new Error("Primero registra la apertura del día");
 
-  const comision = calcularComision(monto);
+  // ingresoDirecto implica sinComision; ambos resultan en comisión $0
+  const essinComision = sinComision || ingresoDirecto;
+  const comision = essinComision ? 0 : calcularComision(monto);
   const estado = tipo === "RETIRO" && pendiente ? "PENDIENTE" : "COMPLETADO";
 
-  // Verificar efectivo para retiros inmediatos
+  // Verificar efectivo para retiros inmediatos (ingresoDirecto es siempre DEPOSITO, no aplica)
   if (tipo === "RETIRO" && estado === "COMPLETADO") {
     const movimientosHoy = await prisma.movimientoFinanciero.findMany({
       where: { hora: { gte: hoy, lt: manana } },
     });
     const efectivoActual =
       Number(apertura.efectivoEmpleada) +
-      movimientosHoy.reduce(
-        (a, m) =>
-          a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
-        0
-      );
+      movimientosHoy
+        .filter((m) => !m.ingresoDirecto)
+        .reduce(
+          (a, m) =>
+            a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+          0
+        );
 
     const necesario = efectivoNecesarioRetiro(tipoComision, monto, comision);
     if (necesario > efectivoActual) {
@@ -220,7 +242,17 @@ export async function registrarMovimiento({
 
   const empleadoId = await getEmpleadoId(session.rol);
   await prisma.movimientoFinanciero.create({
-    data: { tipo, estado, tipoComision, monto, comision, notas: notas?.trim() || null, empleadoId },
+    data: {
+      tipo,
+      estado,
+      tipoComision,
+      monto,
+      comision,
+      sinComision: essinComision,
+      ingresoDirecto,
+      notas: notas?.trim() || null,
+      empleadoId,
+    },
   });
 
   revalidatePath("/dashboard/financiero");
@@ -318,13 +350,16 @@ export async function editarMovimiento(
     throw new Error("Solo se pueden editar operaciones del día actual");
   }
 
+  // No recalcular comisión si el movimiento fue registrado sin comisión
+  const nuevaComision = mov.sinComision ? 0 : calcularComision(monto);
+
   await prisma.movimientoFinanciero.update({
     where: { id: movimientoId },
     data: {
       monto,
-      comision: calcularComision(monto),
+      comision: nuevaComision,
       notas: notas?.trim() || null,
-      ...(tipoComision ? { tipoComision } : {}),
+      ...(tipoComision && !mov.sinComision ? { tipoComision } : {}),
     },
   });
 
@@ -386,15 +421,16 @@ export async function cerrarDia({
 
   if (!apertura) throw new Error("No hay apertura registrada hoy");
 
-  const deltaEfectivo = movimientos.reduce(
+  const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
+  const deltaEfectivo = movimientosNormales.reduce(
     (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const deltaTarjeta = movimientos.reduce(
+  const deltaTarjeta = movimientosNormales.reduce(
     (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const cajaChicaCalculada = movimientos.reduce(
+  const cajaChicaCalculada = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)),
     0
   );

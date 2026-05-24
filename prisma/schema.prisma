@@ -285,17 +285,19 @@ model AperturaFinanciero {
 }
 
 model MovimientoFinanciero {
-  id            Int            @id @default(autoincrement())
-  tipo          TipoMovimiento
-  estado        EstadoMovimiento @default(COMPLETADO)
-  tipoComision  TipoComision     @default(EFECTIVO) @map("tipo_comision")
-  monto         Decimal          @db.Decimal(12, 2)
-  comision      Decimal          @db.Decimal(10, 2)
-  notas         String?
-  hora          DateTime         @default(now())
-  confirmadoEn  DateTime?        @map("confirmado_en")
-  empleadoId    Int            @map("empleado_id")
-  empleado      Usuario        @relation(fields: [empleadoId], references: [id])
+  id             Int              @id @default(autoincrement())
+  tipo           TipoMovimiento
+  estado         EstadoMovimiento @default(COMPLETADO)
+  tipoComision   TipoComision     @default(EFECTIVO) @map("tipo_comision")
+  monto          Decimal          @db.Decimal(12, 2)
+  comision       Decimal          @db.Decimal(10, 2)
+  sinComision    Boolean          @default(false) @map("sin_comision")
+  ingresoDirecto Boolean          @default(false) @map("ingreso_directo")
+  notas          String?
+  hora           DateTime         @default(now())
+  confirmadoEn   DateTime?        @map("confirmado_en")
+  empleadoId     Int              @map("empleado_id")
+  empleado       Usuario          @relation(fields: [empleadoId], references: [id])
 
   @@map("movimientos_financiero")
 }

@@ -27,6 +27,8 @@ interface Movimiento {
   tipoComision: TipoComision;
   monto: number;
   comision: number;
+  sinComision: boolean;
+  ingresoDirecto: boolean;
   notas: string | null;
   hora: string;
   confirmadoEn: string | null;
@@ -39,6 +41,7 @@ export interface EstadoFinanciero {
   efectivoEmpleada: number | null;
   saldoTarjeta: number | null;
   cajaAzulTotal: number | null;
+  totalIngresoDirecto: number;
   cajaChicaTotal: number; // interno, para Panel del Día; no se muestra aquí
   pendientes: number;
   sumaRetiros: number;
@@ -488,6 +491,20 @@ function MovimientoRow({
 }) {
   const hora = new Date(mov.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
   const esRetiro = mov.tipo === "RETIRO";
+  const esEspecial = mov.sinComision || mov.ingresoDirecto;
+
+  let badgeLabel: string;
+  let badgeClass: string;
+  if (mov.ingresoDirecto) {
+    badgeLabel = "Ingreso de efectivo";
+    badgeClass = "bg-blue-900/40 text-blue-300";
+  } else if (mov.sinComision) {
+    badgeLabel = "Retiro sin comisión";
+    badgeClass = "bg-orange-900/40 text-orange-300";
+  } else {
+    badgeLabel = esRetiro ? "Retiro" : "Depósito";
+    badgeClass = esRetiro ? "bg-orange-900/40 text-orange-300" : "bg-emerald-900/40 text-emerald-300";
+  }
 
   return (
     <div className={`px-4 py-3 ${esCancelado ? "opacity-40" : ""}`}>
@@ -497,10 +514,8 @@ function MovimientoRow({
         <div className="flex-1 min-w-0">
           {/* Badges y monto */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-              esRetiro ? "bg-orange-900/40 text-orange-300" : "bg-emerald-900/40 text-emerald-300"
-            }`}>
-              {esRetiro ? "Retiro" : "Depósito"}
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
+              {badgeLabel}
             </span>
 
             {esPendiente && (
@@ -514,7 +529,7 @@ function MovimientoRow({
               </span>
             )}
 
-            {mov.tipoComision === "TRANSFERENCIA" && !esCancelado ? (
+            {mov.tipoComision === "TRANSFERENCIA" && !esCancelado && !esEspecial ? (
               <div className="flex flex-col">
                 <span className="text-sm font-bold text-white">
                   ${fmt(mov.monto + mov.comision)}
@@ -528,7 +543,7 @@ function MovimientoRow({
                 ${fmt(mov.monto)}
               </span>
             )}
-            {!esCancelado && mov.tipoComision !== "TRANSFERENCIA" && (
+            {!esCancelado && !esEspecial && mov.tipoComision !== "TRANSFERENCIA" && (
               <>
                 <span className="text-xs text-gray-600">+${fmt(mov.comision)}</span>
                 <span className="text-xs text-gray-700">
@@ -589,11 +604,21 @@ function FormOperacion({
 }: {
   efectivoEmpleada: number;
   cargando: boolean;
-  onRegistrar: (d: { tipo: TipoMov; tipoComision: TipoComision; pendiente?: boolean; monto: number; notas?: string }) => void;
+  onRegistrar: (d: {
+    tipo: TipoMov;
+    tipoComision: TipoComision;
+    pendiente?: boolean;
+    monto: number;
+    notas?: string;
+    sinComision?: boolean;
+    ingresoDirecto?: boolean;
+  }) => void;
 }) {
   const [tipo, setTipo] = useState<TipoMov | null>(null);
   const [tipoComision, setTipoComision] = useState<TipoComision>("EFECTIVO");
   const [pendiente, setPendiente] = useState(false);
+  const [sinComision, setSinComision] = useState(false);
+  const [ingresoDirecto, setIngresoDirecto] = useState(false);
   const [monto, setMonto] = useState("");
   const [notas, setNotas] = useState("");
 
@@ -601,37 +626,43 @@ function FormOperacion({
 
   // Para RETIRO con comisión en transferencia:
   // el empleado escribe el TOTAL que transfirió el cliente.
-  // El sistema calcula retiro real y comisión.
-  const esTransferencia = tipo === "RETIRO" && tipoComision === "TRANSFERENCIA";
+  const esTransferencia = tipo === "RETIRO" && tipoComision === "TRANSFERENCIA" && !sinComision;
   const { retiro: retiroCalculado, comision: comisionCalculada } =
     esTransferencia && montoNum > 0
       ? calcularDesdeTotal(montoNum)
-      : { retiro: montoNum, comision: montoNum > 0 ? calcularComision(montoNum) : 0 };
+      : { retiro: montoNum, comision: sinComision || ingresoDirecto ? 0 : montoNum > 0 ? calcularComision(montoNum) : 0 };
 
-  // Monto que realmente baja de caja (retiro real, no el total transferido)
   const montoRetiro = esTransferencia ? retiroCalculado : montoNum;
   const comision = comisionCalculada;
 
-  // Efectivo necesario para el retiro (teniendo en cuenta tipo de comisión)
   const efectivoNecesario =
-    tipo === "RETIRO" && tipoComision === "TRANSFERENCIA"
-      ? montoRetiro + comision   // da retiro + extrae comisión a caja chica
+    tipo === "RETIRO" && tipoComision === "TRANSFERENCIA" && !sinComision
+      ? montoRetiro + comision
       : montoRetiro;
 
   const sinEfectivo = tipo === "RETIRO" && !pendiente && montoNum > 0 && efectivoNecesario > efectivoEmpleada;
   const valido = tipo !== null && montoNum > 0 && !cargando && !sinEfectivo && (esTransferencia ? retiroCalculado > 0 : true);
 
-  // Descripción del efecto en caja para el usuario
   function efectoDescripcion(): string {
     if (!tipo || montoNum === 0) return "";
+    if (ingresoDirecto) return "Va directo a la bolsa azul · No afecta el efectivo de la empleada";
     if (tipo === "RETIRO") {
-      if (tipoComision === "EFECTIVO")
-        return `Caja: −$${fmt(montoRetiro)} · Caja chica: +$${fmt(comision)}`;
+      if (sinComision) return `Caja: −$${fmt(montoRetiro)} · Sin comisión`;
+      if (tipoComision === "EFECTIVO") return `Caja: −$${fmt(montoRetiro)} · Caja chica: +$${fmt(comision)}`;
       return `Caja: −$${fmt(montoRetiro + comision)} · Caja chica: +$${fmt(comision)}`;
     }
-    if (tipoComision === "EFECTIVO")
-      return `Caja: +$${fmt(montoRetiro)} · Caja chica: +$${fmt(comision)}`;
+    if (tipoComision === "EFECTIVO") return `Caja: +$${fmt(montoRetiro)} · Caja chica: +$${fmt(comision)}`;
     return `Caja: +$${fmt(montoRetiro - comision)} · Caja chica: +$${fmt(comision)}`;
+  }
+
+  function handleTipo(t: TipoMov) {
+    setTipo(t);
+    setMonto("");
+    setNotas("");
+    setPendiente(false);
+    setSinComision(false);
+    setIngresoDirecto(false);
+    setTipoComision("EFECTIVO");
   }
 
   function handleRegistrar() {
@@ -640,12 +671,16 @@ function FormOperacion({
       tipo,
       tipoComision,
       pendiente: tipo === "RETIRO" ? pendiente : undefined,
-      monto: montoRetiro,   // siempre guarda el retiro real, no el total
+      monto: montoRetiro,
       notas: notas.trim() || undefined,
+      sinComision: sinComision || undefined,
+      ingresoDirecto: ingresoDirecto || undefined,
     });
     setMonto("");
     setNotas("");
     setPendiente(false);
+    setSinComision(false);
+    setIngresoDirecto(false);
   }
 
   return (
@@ -657,13 +692,7 @@ function FormOperacion({
         {(["RETIRO", "DEPOSITO"] as TipoMov[]).map((t) => (
           <button
             key={t}
-            onClick={() => {
-              setTipo(t);
-              setMonto("");
-              setNotas("");
-              setPendiente(false);
-              setTipoComision("EFECTIVO");
-            }}
+            onClick={() => handleTipo(t)}
             className={`flex flex-col items-center rounded-xl border py-4 transition ${
               tipo === t
                 ? t === "RETIRO"
@@ -681,43 +710,86 @@ function FormOperacion({
 
       {tipo && (
         <div className="space-y-3">
-          {/* Tipo de comisión */}
-          <div>
-            <label className="mb-1.5 block text-sm text-gray-400">Cómo se cobró la comisión</label>
-            <div className="space-y-1.5">
-              {tipo === "RETIRO" ? (
-                <>
-                  <ComisionOpcion
-                    activo={tipoComision === "EFECTIVO"}
-                    onClick={() => setTipoComision("EFECTIVO")}
-                    titulo="Comisión en efectivo"
-                    desc="Cliente transfirió el monto exacto y pagó la comisión aparte en cash"
-                  />
-                  <ComisionOpcion
-                    activo={tipoComision === "TRANSFERENCIA"}
-                    onClick={() => setTipoComision("TRANSFERENCIA")}
-                    titulo="Comisión en transferencia"
-                    desc="Cliente transfirió monto + comisión juntos, recibe solo el monto en cash"
-                  />
-                </>
-              ) : (
-                <>
-                  <ComisionOpcion
-                    activo={tipoComision === "EFECTIVO"}
-                    onClick={() => setTipoComision("EFECTIVO")}
-                    titulo="Comisión en efectivo"
-                    desc="Cliente pagó la comisión aparte en cash, recibe la transferencia completa"
-                  />
-                  <ComisionOpcion
-                    activo={tipoComision === "DESCONTADA"}
-                    onClick={() => setTipoComision("DESCONTADA")}
-                    titulo="Comisión descontada"
-                    desc="Se descuenta del monto que recibe el cliente en la transferencia"
-                  />
-                </>
-              )}
+
+          {/* Switch "Sin comisión" — solo para RETIRO */}
+          {tipo === "RETIRO" && (
+            <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-2.5">
+              <button
+                onClick={() => { setSinComision((v) => !v); if (!sinComision) setTipoComision("EFECTIVO"); }}
+                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${sinComision ? "bg-brand-500" : "bg-gray-700"}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${sinComision ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+              <div>
+                <p className={`text-xs font-medium ${sinComision ? "text-brand-300" : "text-gray-400"}`}>
+                  Sin comisión
+                </p>
+                <p className="text-xs text-gray-600">
+                  {sinComision ? "No se cobra comisión en esta operación" : "Se cobra comisión normal"}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Switch "Ingreso de efectivo" — solo para DEPOSITO */}
+          {tipo === "DEPOSITO" && (
+            <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-2.5">
+              <button
+                onClick={() => setIngresoDirecto((v) => !v)}
+                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${ingresoDirecto ? "bg-blue-500" : "bg-gray-700"}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${ingresoDirecto ? "translate-x-4" : "translate-x-0.5"}`} />
+              </button>
+              <div>
+                <p className={`text-xs font-medium ${ingresoDirecto ? "text-blue-300" : "text-gray-400"}`}>
+                  Ingreso de efectivo
+                </p>
+                <p className="text-xs text-gray-600">
+                  {ingresoDirecto ? "Sin comisión · Va directo a bolsa azul de Guadalupe" : "Depósito normal con comisión"}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Tipo de comisión — oculto si sinComision o ingresoDirecto */}
+          {!sinComision && !ingresoDirecto && (
+            <div>
+              <label className="mb-1.5 block text-sm text-gray-400">Cómo se cobró la comisión</label>
+              <div className="space-y-1.5">
+                {tipo === "RETIRO" ? (
+                  <>
+                    <ComisionOpcion
+                      activo={tipoComision === "EFECTIVO"}
+                      onClick={() => setTipoComision("EFECTIVO")}
+                      titulo="Comisión en efectivo"
+                      desc="Cliente transfirió el monto exacto y pagó la comisión aparte en cash"
+                    />
+                    <ComisionOpcion
+                      activo={tipoComision === "TRANSFERENCIA"}
+                      onClick={() => setTipoComision("TRANSFERENCIA")}
+                      titulo="Comisión en transferencia"
+                      desc="Cliente transfirió monto + comisión juntos, recibe solo el monto en cash"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <ComisionOpcion
+                      activo={tipoComision === "EFECTIVO"}
+                      onClick={() => setTipoComision("EFECTIVO")}
+                      titulo="Comisión en efectivo"
+                      desc="Cliente pagó la comisión aparte en cash, recibe la transferencia completa"
+                    />
+                    <ComisionOpcion
+                      activo={tipoComision === "DESCONTADA"}
+                      onClick={() => setTipoComision("DESCONTADA")}
+                      titulo="Comisión descontada"
+                      desc="Se descuenta del monto que recibe el cliente en la transferencia"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Toggle pendiente (solo retiros) */}
           {tipo === "RETIRO" && (
@@ -742,9 +814,7 @@ function FormOperacion({
           {/* Monto */}
           <div>
             <label className="mb-1.5 block text-sm text-gray-400">
-              {esTransferencia
-                ? "Total que transfirió el cliente"
-                : "Monto de la operación"}
+              {esTransferencia ? "Total que transfirió el cliente" : "Monto de la operación"}
             </label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
@@ -775,12 +845,14 @@ function FormOperacion({
               </div>
             )}
 
-            {/* Info normal para otros tipos */}
-            {!esTransferencia && montoNum > 0 && (
+            {/* Info efecto */}
+            {montoNum > 0 && (
               <div className="mt-1.5 space-y-0.5">
-                <p className="text-xs text-gray-500">
-                  Comisión: <span className="text-brand-400 font-medium">${fmt(comision)}</span>
-                </p>
+                {!sinComision && !ingresoDirecto && !esTransferencia && (
+                  <p className="text-xs text-gray-500">
+                    Comisión: <span className="text-brand-400 font-medium">${fmt(comision)}</span>
+                  </p>
+                )}
                 <p className="text-xs text-gray-600">{efectoDescripcion()}</p>
               </div>
             )}
@@ -808,13 +880,17 @@ function FormOperacion({
             onClick={handleRegistrar}
             disabled={!valido}
             className={`w-full rounded-xl py-3 text-sm font-bold text-white transition disabled:opacity-40 ${
-              tipo === "RETIRO"
-                ? pendiente ? "bg-amber-700 hover:bg-amber-600" : "bg-orange-700 hover:bg-orange-600"
+              ingresoDirecto
+                ? "bg-blue-700 hover:bg-blue-600"
+                : tipo === "RETIRO"
+                ? pendiente ? "bg-amber-700 hover:bg-amber-600" : sinComision ? "bg-brand-700 hover:bg-brand-600" : "bg-orange-700 hover:bg-orange-600"
                 : "bg-emerald-700 hover:bg-emerald-600"
             }`}
           >
             {cargando ? "Registrando..." :
+              ingresoDirecto ? "Registrar ingreso" :
               tipo === "RETIRO" && pendiente ? "Registrar pendiente" :
+              tipo === "RETIRO" && sinComision ? "Registrar sin comisión" :
               tipo === "RETIRO" ? "Registrar retiro" : "Registrar depósito"}
           </button>
         </div>
@@ -1246,15 +1322,20 @@ function ResumenCierre({ props }: { props: EstadoFinanciero }) {
           {props.movimientos.map((m) => {
             const hora = new Date(m.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
             const esRetiro = m.tipo === "RETIRO";
+            const esEspecial = m.sinComision || m.ingresoDirecto;
+            const badgeLabel = m.ingresoDirecto ? "Ingreso de efectivo" : m.sinComision ? "Retiro sin comisión" : esRetiro ? "Retiro" : "Depósito";
+            const badgeClass = m.ingresoDirecto
+              ? "bg-blue-900/40 text-blue-300"
+              : esRetiro ? "bg-orange-900/40 text-orange-300" : "bg-emerald-900/40 text-emerald-300";
             return (
               <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${m.estado === "CANCELADO" ? "opacity-40" : ""}`}>
                 <span className="font-mono text-xs text-gray-600">{hora}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${esRetiro ? "bg-orange-900/40 text-orange-300" : "bg-emerald-900/40 text-emerald-300"}`}>
-                  {esRetiro ? "Retiro" : "Depósito"}
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
+                  {badgeLabel}
                 </span>
                 {m.estado === "PENDIENTE" && <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs font-semibold text-amber-300">Pendiente</span>}
                 {m.estado === "CANCELADO" && <span className="text-xs text-gray-600">Cancelado</span>}
-                {m.tipoComision === "TRANSFERENCIA" && m.estado !== "CANCELADO" ? (
+                {m.tipoComision === "TRANSFERENCIA" && m.estado !== "CANCELADO" && !esEspecial ? (
                   <div className="flex-1 flex flex-col">
                     <span className="text-sm text-white font-medium">${fmt(m.monto + m.comision)}</span>
                     <span className="text-xs text-gray-600">${fmt(m.monto)} + ${fmt(m.comision)} comisión</span>
@@ -1263,7 +1344,7 @@ function ResumenCierre({ props }: { props: EstadoFinanciero }) {
                   <span className="flex-1 text-sm text-white font-medium">${fmt(m.monto)}</span>
                 )}
                 {m.notas && <span className="text-xs text-gray-500 truncate max-w-32">{m.notas}</span>}
-                {m.tipoComision !== "TRANSFERENCIA" && (
+                {!esEspecial && m.tipoComision !== "TRANSFERENCIA" && (
                   <span className="text-xs text-gray-500 shrink-0">+${fmt(m.comision)}</span>
                 )}
               </div>

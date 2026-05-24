@@ -183,18 +183,22 @@ export async function getCategoriasProducto() {
 }
 
 export async function createCategoriaProducto(nombre: string) {
-  await requireDueno();
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
   const trimmed = nombre.trim();
   if (!trimmed) throw new Error("El nombre no puede estar vacío");
   const created = await prisma.categoriaProductoConfig.create({ data: { nombre: trimmed } });
   revalidatePath("/dashboard/configuracion");
+  revalidatePath("/dashboard/productos");
   return { id: created.id, nombre: created.nombre };
 }
 
 export async function deleteCategoriaProducto(id: number) {
-  await requireDueno();
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
   await prisma.categoriaProductoConfig.update({ where: { id }, data: { activa: false } });
   revalidatePath("/dashboard/configuracion");
+  revalidatePath("/dashboard/productos");
 }
 
 export async function deleteCategoriaProductoConReasignacion(
@@ -202,7 +206,8 @@ export async function deleteCategoriaProductoConReasignacion(
   nombreOrigen: string,
   reasignarA: { categoria: CategoriaProductoEnum; categoriaExtra: string | null } | null
 ) {
-  await requireDueno();
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
   await prisma.producto.updateMany({
     where: { categoria: "OTRO", categoriaExtra: nombreOrigen },
     data: reasignarA

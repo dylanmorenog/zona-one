@@ -15,13 +15,14 @@ function inicioFinDia() {
 export async function getDatosProductos() {
   const { inicio, fin } = inicioFinDia();
 
-  const [productos, ventasHoy] = await Promise.all([
-    prisma.producto.findMany({ orderBy: [{ categoria: "asc" }, { nombre: "asc" }] }),
+  const [productos, ventasHoy, categoriasCustom] = await Promise.all([
+    prisma.producto.findMany({ orderBy: [{ categoria: "asc" }, { categoriaExtra: "asc" }, { nombre: "asc" }] }),
     prisma.ventaProducto.findMany({
       where: { hora: { gte: inicio, lt: fin } },
       include: { producto: { select: { nombre: true } } },
       orderBy: { hora: "desc" },
     }),
+    prisma.categoriaProductoConfig.findMany({ where: { activa: true }, orderBy: { nombre: "asc" } }),
   ]);
 
   const totalHoy = ventasHoy.reduce((acc, v) => acc + Number(v.total), 0);
@@ -31,6 +32,7 @@ export async function getDatosProductos() {
       id: p.id,
       nombre: p.nombre,
       categoria: p.categoria as string,
+      categoriaExtra: p.categoriaExtra ?? null,
       precioVenta: Number(p.precioVenta),
       precioCosto: Number(p.precioCosto),
       stockActual: p.stockActual,
@@ -46,6 +48,7 @@ export async function getDatosProductos() {
       metodoPago: v.metodoPago as "EFECTIVO" | "TARJETA",
     })),
     totalHoy,
+    categoriasCustom: categoriasCustom.map((c) => ({ id: c.id, nombre: c.nombre })),
   };
 }
 
@@ -127,6 +130,7 @@ export async function guardarProducto(
   data: {
     nombre: string;
     categoria: string;
+    categoriaExtra?: string | null;
     precioVenta: number;
     precioCosto: number;
     stockMinimo: number;
@@ -136,13 +140,17 @@ export async function guardarProducto(
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
 
+  type CatEnum = "DULCES" | "FRITURAS" | "PAPELERIA" | "BEBIDAS" | "OTRO";
+  const cat = data.categoria as CatEnum;
+
   if (id) {
     if (session.rol === "DUENO") {
       await prisma.producto.update({
         where: { id },
         data: {
           nombre: data.nombre,
-          categoria: data.categoria as "DULCES" | "FRITURAS" | "PAPELERIA" | "BEBIDAS" | "OTRO",
+          categoria: cat,
+          categoriaExtra: data.categoriaExtra ?? null,
           precioVenta: data.precioVenta,
           precioCosto: data.precioCosto,
           stockMinimo: data.stockMinimo,
@@ -153,19 +161,21 @@ export async function guardarProducto(
         where: { id },
         data: {
           nombre: data.nombre,
+          categoria: cat,
+          categoriaExtra: data.categoriaExtra ?? null,
           precioVenta: data.precioVenta,
           stockMinimo: data.stockMinimo,
         },
       });
     }
   } else {
-    if (session.rol !== "DUENO") throw new Error("Solo el dueño puede crear productos");
     await prisma.producto.create({
       data: {
         nombre: data.nombre,
-        categoria: data.categoria as "DULCES" | "FRITURAS" | "PAPELERIA" | "BEBIDAS" | "OTRO",
+        categoria: cat,
+        categoriaExtra: data.categoriaExtra ?? null,
         precioVenta: data.precioVenta,
-        precioCosto: data.precioCosto,
+        precioCosto: session.rol === "DUENO" ? data.precioCosto : 0,
         stockMinimo: data.stockMinimo,
         stockActual: data.stockInicial ?? 0,
       },

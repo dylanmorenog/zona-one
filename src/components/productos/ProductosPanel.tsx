@@ -7,6 +7,10 @@ import {
   toggleActivoProducto,
   eliminarProducto,
 } from "@/app/actions/productos";
+import {
+  createCategoriaProducto,
+  deleteCategoriaProducto,
+} from "@/app/actions/configuracion";
 import { useToast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +21,7 @@ interface Producto {
   id: number;
   nombre: string;
   categoria: string;
+  categoriaExtra: string | null;
   precioVenta: number;
   precioCosto: number;
   stockActual: number;
@@ -37,6 +42,7 @@ interface Props {
   productos: Producto[];
   ventasHoy: VentaHoy[];
   totalHoy: number;
+  categoriasCustom: { id: number; nombre: string }[];
   rol: string;
 }
 
@@ -49,15 +55,21 @@ const CAT: Record<string, { label: string; badge: string }> = {
   BEBIDAS:   { label: "Bebidas",   badge: "bg-cyan-900/40 text-cyan-300"     },
   OTRO:      { label: "Otro",      badge: "bg-gray-800 text-gray-400"        },
 };
-const catCfg = (c: string) => CAT[c] ?? CAT.OTRO;
 
-const CATEGORIAS_OPCIONES = ["FRITURAS", "DULCES", "PAPELERIA", "BEBIDAS", "OTRO"] as const;
+const CUSTOM_BADGE = "bg-purple-900/40 text-purple-300";
+
+function getCatDisplay(p: Pick<Producto, "categoria" | "categoriaExtra">) {
+  if (p.categoriaExtra) return { label: p.categoriaExtra, badge: CUSTOM_BADGE };
+  return CAT[p.categoria] ?? CAT.OTRO;
+}
+
+const CATEGORIAS_ENUM = ["FRITURAS", "DULCES", "PAPELERIA", "BEBIDAS", "OTRO"] as const;
 
 // ─── Panel principal ──────────────────────────────────────────────────────────
 
 type Vista = "venta" | "inventario";
 
-export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
+export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCustom, rol }: Props) {
   const router = useRouter();
   const toast = useToast();
   const [vista, setVista] = useState<Vista>("venta");
@@ -121,11 +133,12 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
       {vista === "inventario" && (
         <VistaInventario
           productos={productos}
+          categoriasCustom={categoriasCustom}
           esDueno={esDueno}
           onEntrada={setModalEntrada}
           onEditar={(p) => setModalProducto(p)}
           onToggleActivo={esDueno ? (p) => ejecutar(() => toggleActivoProducto(p.id)) : undefined}
-          onNuevo={esDueno ? () => setModalProducto("nuevo") : undefined}
+          onNuevo={() => setModalProducto("nuevo")}
           onEliminar={setConfirmEliminar}
           cargando={cargando}
         />
@@ -163,6 +176,7 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
         <ModalProducto
           producto={modalProducto === "nuevo" ? null : modalProducto}
           esDueno={esDueno}
+          categoriasCustom={categoriasCustom}
           cargando={cargando}
           onGuardar={(id, data) =>
             ejecutar(async () => {
@@ -193,7 +207,7 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, rol }: Props) {
 
 // ─── Vista Venta ──────────────────────────────────────────────────────────────
 
-const FILTROS = ["TODOS", ...CATEGORIAS_OPCIONES] as const;
+const FILTROS = ["TODOS", ...CATEGORIAS_ENUM] as const;
 type Filtro = (typeof FILTROS)[number];
 
 function VistaVenta({
@@ -209,7 +223,6 @@ function VistaVenta({
 }) {
   const [filtro, setFiltro] = useState<Filtro>("TODOS");
 
-  // Solo mostrar filtros que tienen productos
   const categoriasConProductos = new Set(productos.map((p) => p.categoria));
   const filtrosDisponibles = FILTROS.filter(
     (f) => f === "TODOS" || categoriasConProductos.has(f)
@@ -239,7 +252,7 @@ function VistaVenta({
                 {f === "TODOS"
                   ? productos.length
                   : productos.filter((p) => p.categoria === f).length}
-              </span>
+            </span>
             </button>
           ))}
         </div>
@@ -263,7 +276,7 @@ function VistaVenta({
               {productosFiltrados.map((p) => {
                 const agotado = p.stockActual <= 0;
                 const bajo = p.stockActual > 0 && p.stockActual <= p.stockMinimo;
-                const cfg = catCfg(p.categoria);
+                const cfg = getCatDisplay(p);
 
                 return (
                   <div
@@ -272,7 +285,6 @@ function VistaVenta({
                       agotado ? "opacity-50" : "hover:bg-gray-800/40"
                     }`}
                   >
-                    {/* Nombre + categoría */}
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${cfg.badge}`}>
                         {cfg.label}
@@ -281,28 +293,14 @@ function VistaVenta({
                         {p.nombre}
                       </span>
                     </div>
-
-                    {/* Precio */}
                     <span className="text-right text-sm font-semibold text-white">
                       ${p.precioVenta.toFixed(0)}
                     </span>
-
-                    {/* Stock */}
                     <div className="text-right">
-                      <span
-                        className={`text-sm font-medium ${
-                          agotado
-                            ? "text-red-400"
-                            : bajo
-                            ? "text-amber-400"
-                            : "text-gray-400"
-                        }`}
-                      >
+                      <span className={`text-sm font-medium ${agotado ? "text-red-400" : bajo ? "text-amber-400" : "text-gray-400"}`}>
                         {agotado ? "Agotado" : bajo ? `⚠ ${p.stockActual}` : p.stockActual}
                       </span>
                     </div>
-
-                    {/* Botón + */}
                     <div className="flex justify-end">
                       <button
                         onClick={() => !agotado && onSeleccionar(p)}
@@ -322,7 +320,6 @@ function VistaVenta({
 
       {/* Panel derecho */}
       <div className="w-60 shrink-0 flex flex-col gap-4">
-        {/* Total */}
         <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
             Ventas del día
@@ -333,7 +330,6 @@ function VistaVenta({
           </p>
         </div>
 
-        {/* Historial */}
         <div className="flex-1 rounded-xl border border-gray-800 bg-gray-900 flex flex-col min-h-0">
           <p className="px-4 pt-3 pb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-800">
             Historial de hoy
@@ -379,6 +375,7 @@ function VistaVenta({
 
 function VistaInventario({
   productos,
+  categoriasCustom,
   esDueno,
   onEntrada,
   onEditar,
@@ -388,22 +385,70 @@ function VistaInventario({
   cargando,
 }: {
   productos: Producto[];
+  categoriasCustom: { id: number; nombre: string }[];
   esDueno: boolean;
   onEntrada: (p: Producto) => void;
   onEditar: (p: Producto) => void;
   onToggleActivo?: (p: Producto) => void;
-  onNuevo?: () => void;
+  onNuevo: () => void;
   onEliminar: (p: Producto) => void;
   cargando: boolean;
 }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [nuevaCat, setNuevaCat] = useState("");
+  const [creandoCat, setCreandoCat] = useState(false);
+  const inputCatRef = useRef<HTMLInputElement>(null);
+
   const bajoMinimo = productos.filter((p) => p.activo && p.stockActual <= p.stockMinimo);
 
   const colsDueno = "grid-cols-[1fr_70px_60px_80px_80px_80px_180px]";
   const colsEmpleado = "grid-cols-[1fr_70px_60px_80px_140px]";
   const cols = esDueno ? colsDueno : colsEmpleado;
 
+  // Build category groups preserving DB order
+  type Grupo = { key: string; label: string; badge: string; productos: Producto[] };
+  const grupos: Grupo[] = [];
+  const grupoMap = new Map<string, Grupo>();
+  for (const p of productos) {
+    const key = p.categoriaExtra ? `custom:${p.categoriaExtra}` : p.categoria;
+    const cfg = getCatDisplay(p);
+    if (!grupoMap.has(key)) {
+      const g: Grupo = { key, label: cfg.label, badge: cfg.badge, productos: [] };
+      grupoMap.set(key, g);
+      grupos.push(g);
+    }
+    grupoMap.get(key)!.productos.push(p);
+  }
+
+  async function agregarCategoria() {
+    const nombre = nuevaCat.trim();
+    if (!nombre) return;
+    setCreandoCat(true);
+    try {
+      await createCategoriaProducto(nombre);
+      router.refresh();
+      setNuevaCat("");
+      toast.success(`Categoría "${nombre}" creada`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al crear categoría");
+    } finally {
+      setCreandoCat(false);
+    }
+  }
+
+  async function eliminarCategoria(id: number, nombre: string) {
+    try {
+      await deleteCategoriaProducto(id);
+      router.refresh();
+      toast.success(`Categoría "${nombre}" eliminada`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Error al eliminar categoría");
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-4 flex-1 min-h-0">
+    <div className="flex flex-col gap-3 flex-1 min-h-0">
       {bajoMinimo.length > 0 && (
         <div className="rounded-xl border border-amber-800/50 bg-amber-950/20 px-4 py-3">
           <p className="text-sm font-semibold text-amber-300 mb-0.5">
@@ -415,22 +460,62 @@ function VistaInventario({
         </div>
       )}
 
+      {/* Categorías personalizadas */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          Categorías personalizadas
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {categoriasCustom.map((c) => (
+            <span
+              key={c.id}
+              className="flex items-center gap-1.5 rounded-full border border-purple-800/50 bg-purple-900/20 pl-3 pr-1.5 py-1 text-xs font-medium text-purple-300"
+            >
+              {c.nombre}
+              <button
+                onClick={() => eliminarCategoria(c.id, c.nombre)}
+                className="flex items-center justify-center w-4 h-4 rounded-full text-purple-500 hover:text-red-400 hover:bg-red-900/30 transition"
+                title="Eliminar categoría"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <div className="flex items-center gap-1">
+            <input
+              ref={inputCatRef}
+              type="text"
+              value={nuevaCat}
+              onChange={(e) => setNuevaCat(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") agregarCategoria(); }}
+              placeholder="Nueva categoría..."
+              className="w-36 rounded-lg border border-dashed border-gray-700 bg-transparent px-2.5 py-1 text-xs text-gray-400 placeholder-gray-600 focus:border-gray-500 focus:outline-none"
+            />
+            <button
+              onClick={agregarCategoria}
+              disabled={creandoCat || !nuevaCat.trim()}
+              className="rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-40 transition"
+            >
+              {creandoCat ? "..." : "+ Agregar"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">
           {productos.filter((p) => p.activo).length} activos ·{" "}
           {productos.filter((p) => !p.activo).length} inactivos
         </p>
-        {esDueno && onNuevo && (
-          <button
-            onClick={onNuevo}
-            className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-            Agregar producto
-          </button>
-        )}
+        <button
+          onClick={onNuevo}
+          className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Agregar producto
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto rounded-xl border border-gray-800 bg-gray-900">
@@ -445,79 +530,93 @@ function VistaInventario({
             <span />
           </div>
 
-          {productos.map((p) => {
-            const agotado = p.stockActual <= 0;
-            const bajo = p.stockActual > 0 && p.stockActual <= p.stockMinimo;
-            const ganancia = p.precioVenta - p.precioCosto;
-            const margen = p.precioVenta > 0 ? Math.round((ganancia / p.precioVenta) * 100) : 0;
-            const cfg = catCfg(p.categoria);
-
-            return (
-              <div
-                key={p.id}
-                className={`grid ${cols} gap-3 items-center px-4 py-3 ${!p.activo ? "opacity-40" : ""}`}
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${cfg.badge}`}>
-                    {cfg.label}
-                  </span>
-                  <span className="truncate text-sm font-medium text-white">{p.nombre}</span>
-                </div>
-                <div className="text-center">
-                  <span className={`text-sm font-bold ${agotado ? "text-red-400" : bajo ? "text-amber-400" : "text-white"}`}>
-                    {p.stockActual}
-                  </span>
-                </div>
-                <div className="text-center text-sm text-gray-500">{p.stockMinimo}</div>
-                <div className="text-right text-sm text-white">${p.precioVenta.toFixed(0)}</div>
-                {esDueno && (
-                  <div className="text-right text-sm text-gray-400">${p.precioCosto.toFixed(2)}</div>
-                )}
-                {esDueno && (
-                  <div className="text-right">
-                    <p className="text-sm text-emerald-400">${ganancia.toFixed(0)}</p>
-                    <p className="text-xs text-gray-600">{margen}%</p>
-                  </div>
-                )}
-                <div className="flex items-center justify-end gap-1.5">
-                  <button
-                    onClick={() => onEntrada(p)}
-                    disabled={cargando || !p.activo}
-                    className="rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-40"
-                  >
-                    +Stock
-                  </button>
-                  <button
-                    onClick={() => onEditar(p)}
-                    disabled={cargando}
-                    className="rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-40"
-                  >
-                    Editar
-                  </button>
-                  {esDueno && onToggleActivo && (
-                    <button
-                      onClick={() => onToggleActivo(p)}
-                      disabled={cargando}
-                      className={`rounded-md border px-2.5 py-1 text-xs disabled:opacity-40 ${
-                        p.activo
-                          ? "border-red-900/50 bg-red-950/30 text-red-400 hover:bg-red-950/50"
-                          : "border-emerald-900/50 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-950/50"
-                      }`}
-                    >
-                      {p.activo ? "Off" : "On"}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => onEliminar(p)}
-                    disabled={cargando}
-                    className="rounded-md border border-red-900/50 bg-red-950/20 px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-40"
-                  >
-                    Eliminar
-                  </button>
-                </div>
+          {grupos.map((grupo) => (
+            <div key={grupo.key}>
+              {/* Category group header */}
+              <div className="px-4 py-1.5 bg-gray-800/30 border-b border-gray-800/60">
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${grupo.badge}`}>
+                  {grupo.label}
+                </span>
+                <span className="ml-2 text-xs text-gray-600">{grupo.productos.length}</span>
               </div>
-            );
-          })}
+
+              {grupo.productos.map((p) => {
+                const agotado = p.stockActual <= 0;
+                const bajo = p.stockActual > 0 && p.stockActual <= p.stockMinimo;
+                const ganancia = p.precioVenta - p.precioCosto;
+                const margen = p.precioVenta > 0 ? Math.round((ganancia / p.precioVenta) * 100) : 0;
+
+                return (
+                  <div
+                    key={p.id}
+                    className={`grid ${cols} gap-3 items-center px-4 py-3 ${!p.activo ? "opacity-40" : ""}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="truncate text-sm font-medium text-white">{p.nombre}</span>
+                    </div>
+                    <div className="text-center">
+                      <span className={`text-sm font-bold ${agotado ? "text-red-400" : bajo ? "text-amber-400" : "text-white"}`}>
+                        {p.stockActual}
+                      </span>
+                    </div>
+                    <div className="text-center text-sm text-gray-500">{p.stockMinimo}</div>
+                    <div className="text-right text-sm text-white">${p.precioVenta.toFixed(0)}</div>
+                    {esDueno && (
+                      <div className="text-right text-sm text-gray-400">${p.precioCosto.toFixed(2)}</div>
+                    )}
+                    {esDueno && (
+                      <div className="text-right">
+                        <p className="text-sm text-emerald-400">${ganancia.toFixed(0)}</p>
+                        <p className="text-xs text-gray-600">{margen}%</p>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => onEntrada(p)}
+                        disabled={cargando || !p.activo}
+                        className="rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-40"
+                      >
+                        +Stock
+                      </button>
+                      <button
+                        onClick={() => onEditar(p)}
+                        disabled={cargando}
+                        className="rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300 hover:bg-gray-700 disabled:opacity-40"
+                      >
+                        Editar
+                      </button>
+                      {esDueno && onToggleActivo && (
+                        <button
+                          onClick={() => onToggleActivo(p)}
+                          disabled={cargando}
+                          className={`rounded-md border px-2.5 py-1 text-xs disabled:opacity-40 ${
+                            p.activo
+                              ? "border-red-900/50 bg-red-950/30 text-red-400 hover:bg-red-950/50"
+                              : "border-emerald-900/50 bg-emerald-950/30 text-emerald-400 hover:bg-emerald-950/50"
+                          }`}
+                        >
+                          {p.activo ? "Off" : "On"}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onEliminar(p)}
+                        disabled={cargando}
+                        className="rounded-md border border-red-900/50 bg-red-950/20 px-2.5 py-1 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-40"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+
+          {productos.length === 0 && (
+            <div className="flex h-32 items-center justify-center text-sm text-gray-600">
+              Sin productos registrados
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -555,7 +654,7 @@ function ModalVenta({
   }, [cantidad, metodoPago, onCancelar, onConfirmar, producto.id]);
 
   const total = cantidad * producto.precioVenta;
-  const cfg = catCfg(producto.categoria);
+  const cfg = getCatDisplay(producto);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancelar}>
@@ -563,14 +662,12 @@ function ModalVenta({
         className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Producto */}
         <div className="mb-4 flex items-center gap-2">
           <span className={`rounded-full px-2 py-0.5 text-xs ${cfg.badge}`}>{cfg.label}</span>
           <span className="font-semibold text-white">{producto.nombre}</span>
           <span className="ml-auto text-sm text-gray-400">${producto.precioVenta}/u</span>
         </div>
 
-        {/* Cantidad */}
         <div className="mb-4 flex items-center justify-between">
           <span className="text-sm text-gray-400">Cantidad</span>
           <div className="flex items-center gap-2">
@@ -591,7 +688,6 @@ function ModalVenta({
           </div>
         </div>
 
-        {/* Método de pago */}
         <div className="mb-4 grid grid-cols-2 gap-2">
           {(["EFECTIVO", "TARJETA"] as const).map((m) => (
             <button
@@ -608,7 +704,6 @@ function ModalVenta({
           ))}
         </div>
 
-        {/* Total + confirmar */}
         <div className="flex items-center gap-3">
           <div className="flex-1">
             <p className="text-xs text-gray-600">Total</p>
@@ -704,18 +799,21 @@ function ModalEntrada({
 function ModalProducto({
   producto,
   esDueno,
+  categoriasCustom,
   cargando,
   onGuardar,
   onCancelar,
 }: {
   producto: Producto | null;
   esDueno: boolean;
+  categoriasCustom: { id: number; nombre: string }[];
   cargando: boolean;
   onGuardar: (
     id: number | null,
     data: {
       nombre: string;
       categoria: string;
+      categoriaExtra?: string | null;
       precioVenta: number;
       precioCosto: number;
       stockMinimo: number;
@@ -724,14 +822,24 @@ function ModalProducto({
   ) => void;
   onCancelar: () => void;
 }) {
+  // Category select value: enum key OR "custom:nombre"
+  const initSelect = (() => {
+    if (producto?.categoriaExtra) return `custom:${producto.categoriaExtra}`;
+    return producto?.categoria ?? "OTRO";
+  })();
+
   const [nombre, setNombre] = useState(producto?.nombre ?? "");
-  const [categoria, setCategoria] = useState(producto?.categoria ?? "OTRO");
+  const [categoriaSelect, setCategoriaSelect] = useState(initSelect);
   const [precioVenta, setPrecioVenta] = useState(producto ? String(producto.precioVenta) : "");
-  const [precioCosto, setPrecioCosto] = useState(producto ? String(producto.precioCosto) : "");
+  const [precioCosto, setPrecioCosto] = useState(producto && esDueno ? String(producto.precioCosto) : "");
   const [stockMinimo, setStockMinimo] = useState(producto ? String(producto.stockMinimo) : "5");
   const [stockInicial, setStockInicial] = useState("0");
 
   const esNuevo = !producto;
+  const isCustom = categoriaSelect.startsWith("custom:");
+  const categoriaEnum = isCustom ? "OTRO" : categoriaSelect;
+  const categoriaExtra = isCustom ? categoriaSelect.slice(7) : null;
+
   const precioCostoValido = !esDueno || (precioCosto !== "" && parseFloat(precioCosto) > 0);
   const valido = nombre.trim() !== "" && parseFloat(precioVenta) > 0 && precioCostoValido;
   const gananciaPreview =
@@ -761,13 +869,21 @@ function ModalProducto({
           <div>
             <label className="mb-1 block text-sm text-gray-400">Categoría</label>
             <select
-              value={categoria}
-              onChange={(e) => setCategoria(e.target.value)}
+              value={categoriaSelect}
+              onChange={(e) => setCategoriaSelect(e.target.value)}
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
             >
-              {CATEGORIAS_OPCIONES.map((c) => (
+              {CATEGORIAS_ENUM.map((c) => (
                 <option key={c} value={c}>{CAT[c]?.label ?? c}</option>
               ))}
+              {categoriasCustom.length > 0 && (
+                <>
+                  <option disabled>── Personalizadas ──</option>
+                  {categoriasCustom.map((c) => (
+                    <option key={`custom:${c.nombre}`} value={`custom:${c.nombre}`}>{c.nombre}</option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
 
@@ -847,9 +963,10 @@ function ModalProducto({
               valido &&
               onGuardar(producto?.id ?? null, {
                 nombre: nombre.trim(),
-                categoria,
+                categoria: categoriaEnum,
+                categoriaExtra,
                 precioVenta: parseFloat(precioVenta),
-                precioCosto: parseFloat(precioCosto),
+                precioCosto: esDueno ? parseFloat(precioCosto) : 0,
                 stockMinimo: parseInt(stockMinimo) || 0,
                 ...(esNuevo ? { stockInicial: parseInt(stockInicial) || 0 } : {}),
               })
