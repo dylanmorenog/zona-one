@@ -61,14 +61,18 @@ export function HistorialPanel({ rol }: { rol: string }) {
   const [reporte, setReporte] = useState<ReporteMensual | null>(null);
   const [cargandoReportes, setCargandoReportes] = useState(false);
 
+  const [errorLista, setErrorLista] = useState<string | null>(null);
+
   async function cargarLista(p: number) {
     setCargandoLista(true);
+    setErrorLista(null);
     try {
       const data = await getListaDias(p);
       setLista(data);
       setPagina(data.paginaActual);
-    } catch { /* silencioso */ }
-    finally { setCargandoLista(false); }
+    } catch (e) {
+      setErrorLista(e instanceof Error ? e.message : "Error al cargar el historial");
+    } finally { setCargandoLista(false); }
   }
 
   async function cargarDia(f: string) {
@@ -117,6 +121,7 @@ export function HistorialPanel({ rol }: { rol: string }) {
       </div>
 
       {/* Lista paginada de días */}
+      {errorLista && <p className="text-sm text-red-400">{errorLista}</p>}
       <ListaDias
         lista={lista}
         cargando={cargandoLista}
@@ -619,6 +624,15 @@ function CierreDia({
               esperado={cierreFinanciero.saldoTarjetaEsperado}
               diferencia={cierreFinanciero.diferenciaTarjeta}
             />
+            {cierreFinanciero.bolsaAzulEsperada !== null && cierreFinanciero.bolsaAzulReal !== null && (
+              <CuentaCierre
+                numero={4}
+                label="Bolsa azul"
+                entregado={cierreFinanciero.bolsaAzulReal}
+                esperado={cierreFinanciero.bolsaAzulEsperada}
+                diferencia={cierreFinanciero.diferenciaBolsaAzul ?? 0}
+              />
+            )}
           </>
         ) : (
           <div className="px-4 py-3">

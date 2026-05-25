@@ -713,42 +713,26 @@ function FormOperacion({
 
           {/* Switch "Sin comisión" — solo para RETIRO */}
           {tipo === "RETIRO" && (
-            <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-2.5">
-              <button
-                onClick={() => { setSinComision((v) => !v); if (!sinComision) setTipoComision("EFECTIVO"); }}
-                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${sinComision ? "bg-brand-500" : "bg-gray-700"}`}
-              >
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${sinComision ? "translate-x-4" : "translate-x-0.5"}`} />
-              </button>
-              <div>
-                <p className={`text-xs font-medium ${sinComision ? "text-brand-300" : "text-gray-400"}`}>
-                  Sin comisión
-                </p>
-                <p className="text-xs text-gray-600">
-                  {sinComision ? "No se cobra comisión en esta operación" : "Se cobra comisión normal"}
-                </p>
-              </div>
-            </div>
+            <SwitchRow
+              activo={sinComision}
+              onToggle={() => { setSinComision((v) => !v); if (!sinComision) setTipoComision("EFECTIVO"); }}
+              colorActivo="bg-blue-600"
+              label="Sin comisión"
+              desc={sinComision ? "No se cobra comisión en esta operación" : "Se cobra comisión normal"}
+              labelActivo="text-blue-300"
+            />
           )}
 
           {/* Switch "Ingreso de efectivo" — solo para DEPOSITO */}
           {tipo === "DEPOSITO" && (
-            <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-2.5">
-              <button
-                onClick={() => setIngresoDirecto((v) => !v)}
-                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${ingresoDirecto ? "bg-blue-500" : "bg-gray-700"}`}
-              >
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${ingresoDirecto ? "translate-x-4" : "translate-x-0.5"}`} />
-              </button>
-              <div>
-                <p className={`text-xs font-medium ${ingresoDirecto ? "text-blue-300" : "text-gray-400"}`}>
-                  Ingreso de efectivo
-                </p>
-                <p className="text-xs text-gray-600">
-                  {ingresoDirecto ? "Sin comisión · Va directo a bolsa azul de Guadalupe" : "Depósito normal con comisión"}
-                </p>
-              </div>
-            </div>
+            <SwitchRow
+              activo={ingresoDirecto}
+              onToggle={() => setIngresoDirecto((v) => !v)}
+              colorActivo="bg-blue-600"
+              label="Ingreso de efectivo"
+              desc={ingresoDirecto ? "Sin comisión · Va directo a bolsa azul" : "Depósito normal con comisión"}
+              labelActivo="text-blue-300"
+            />
           )}
 
           {/* Tipo de comisión — oculto si sinComision o ingresoDirecto */}
@@ -793,22 +777,14 @@ function FormOperacion({
 
           {/* Toggle pendiente (solo retiros) */}
           {tipo === "RETIRO" && (
-            <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-2.5">
-              <button
-                onClick={() => setPendiente((v) => !v)}
-                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${pendiente ? "bg-amber-500" : "bg-gray-700"}`}
-              >
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${pendiente ? "translate-x-4" : "translate-x-0.5"}`} />
-              </button>
-              <div>
-                <p className={`text-xs font-medium ${pendiente ? "text-amber-300" : "text-gray-400"}`}>
-                  {pendiente ? "Pendiente de entrega" : "Entrega inmediata"}
-                </p>
-                <p className="text-xs text-gray-600">
-                  {pendiente ? "El cliente aún no llega" : "El cliente está presente"}
-                </p>
-              </div>
-            </div>
+            <SwitchRow
+              activo={pendiente}
+              onToggle={() => setPendiente((v) => !v)}
+              colorActivo="bg-amber-500"
+              label={pendiente ? "Pendiente de entrega" : "Entrega inmediata"}
+              desc={pendiente ? "El cliente aún no llega" : "El cliente está presente"}
+              labelActivo="text-amber-300"
+            />
           )}
 
           {/* Monto */}
@@ -895,6 +871,48 @@ function FormOperacion({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Switch reutilizable ──────────────────────────────────────────────────────
+
+function SwitchRow({
+  activo,
+  onToggle,
+  colorActivo,
+  label,
+  desc,
+  labelActivo,
+}: {
+  activo: boolean;
+  onToggle: () => void;
+  colorActivo: string;
+  label: string;
+  desc: string;
+  labelActivo: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg bg-gray-800/60 px-3 py-2.5">
+      <button
+        type="button"
+        onClick={onToggle}
+        className={`relative shrink-0 w-10 h-6 rounded-full transition-colors duration-200 ${
+          activo ? colorActivo : "bg-gray-700"
+        }`}
+      >
+        <span
+          className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
+            activo ? "translate-x-5" : "translate-x-1"
+          }`}
+        />
+      </button>
+      <div>
+        <p className={`text-xs font-medium ${activo ? labelActivo : "text-gray-400"}`}>
+          {label}
+        </p>
+        <p className="text-xs text-gray-600">{desc}</p>
+      </div>
     </div>
   );
 }

@@ -184,7 +184,10 @@ export async function cerrarDiaCompleto({
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
   const totalServicios = serviciosHoy.reduce((a, s) => a + Number(s.total), 0);
   const totalProductos = ventasHoy.reduce((a, v) => a + Number(v.total), 0);
-  const totalComisiones = movimientos.reduce(
+
+  // Filtrar ingresoDirecto para no afectar caja chica ni tarjeta
+  const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
+  const totalComisiones = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
   const totalGeneral = totalXbox + totalServicios + totalProductos + totalComisiones;
@@ -210,16 +213,17 @@ export async function cerrarDiaCompleto({
   });
 
   if (apertura && !cierreFinExistente) {
-    const deltaEfectivo = movimientos.reduce(
+    const deltaEfectivo = movimientosNormales.reduce(
       (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
     );
-    const deltaTarjeta = movimientos.reduce(
+    const deltaTarjeta = movimientosNormales.reduce(
       (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
     );
     const efectivoFinal = Number(apertura.efectivoEmpleada) + deltaEfectivo;
     const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
     const finalSaldoTarjetaReal = saldoTarjetaReal ?? saldoTarjetaEsperado;
     const diferenciaFinanciero = finalSaldoTarjetaReal - saldoTarjetaEsperado;
+    const diferenciaCajaChica = cajaChicaReal - totalComisiones;
 
     await prisma.cierreFinanciero.create({
       data: {
@@ -228,7 +232,7 @@ export async function cerrarDiaCompleto({
         efectivoFinal,
         cajaChicaCalculada: totalComisiones,
         cajaChicaReal,
-        diferenciaCajaChica: diferencia,
+        diferenciaCajaChica,
         saldoTarjetaEsperado,
         saldoTarjetaReal: finalSaldoTarjetaReal,
         diferencia: diferenciaFinanciero,
@@ -238,6 +242,7 @@ export async function cerrarDiaCompleto({
   }
 
   revalidatePath("/dashboard");
+  revalidatePath("/dashboard/historial");
   revalidatePath("/dashboard/financiero");
   revalidatePath("/dashboard/xbox");
   revalidatePath("/dashboard/servicios");

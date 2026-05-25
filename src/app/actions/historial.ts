@@ -21,7 +21,7 @@ export async function getDiaSummary(fechaStr: string) {
 
   const { inicio, fin, fecha } = rangoFecha(fechaStr);
 
-  const [sesionesXbox, servicios, ventas, movimientos, gastosDelDia, cierreDia, cierreFinanciero] =
+  const [sesionesXbox, servicios, ventas, movimientos, gastosDelDia, cierreDia, cierreFinanciero, configFinanciero] =
     await Promise.all([
       prisma.sesionXbox.findMany({
         where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } },
@@ -44,6 +44,7 @@ export async function getDiaSummary(fechaStr: string) {
       }),
       prisma.cierreDia.findFirst({ where: { fecha } }),
       prisma.cierreFinanciero.findFirst({ where: { fecha } }),
+      prisma.configFinanciero.findFirst(),
     ]);
 
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
@@ -57,7 +58,8 @@ export async function getDiaSummary(fechaStr: string) {
   }
   const totalServicios = servicios.reduce((a, s) => a + Number(s.total), 0);
   const totalProductos = ventas.reduce((a, v) => a + Number(v.total), 0);
-  const totalComisiones = movimientos.reduce(
+  const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
+  const totalComisiones = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
   const totalGastos = gastosDelDia.reduce((a, g) => a + Number(g.monto), 0);
@@ -138,14 +140,27 @@ export async function getDiaSummary(fechaStr: string) {
       : null,
 
     cierreFinanciero: cierreFinanciero
-      ? {
-          sobranteEntregado: Number(cierreFinanciero.sobrante),
-          sobranteCalculado: Number(cierreFinanciero.efectivoFinal),
-          diferenciaSobrante: Number(cierreFinanciero.sobrante) - Number(cierreFinanciero.efectivoFinal),
-          saldoTarjetaReportado: Number(cierreFinanciero.saldoTarjetaReal),
-          saldoTarjetaEsperado: Number(cierreFinanciero.saldoTarjetaEsperado),
-          diferenciaTarjeta: Number(cierreFinanciero.diferencia),
-        }
+      ? (() => {
+          const capital = configFinanciero ? Number(configFinanciero.capitalTotal) : null;
+          const saldoTarjetaEsperado = Number(cierreFinanciero.saldoTarjetaEsperado);
+          const saldoTarjetaReportado = Number(cierreFinanciero.saldoTarjetaReal);
+          const bolsaAzulEsperada = capital !== null ? capital - saldoTarjetaEsperado : null;
+          const bolsaAzulReal = capital !== null ? capital - saldoTarjetaReportado : null;
+          const diferenciaBolsaAzul = bolsaAzulEsperada !== null && bolsaAzulReal !== null
+            ? bolsaAzulReal - bolsaAzulEsperada
+            : null;
+          return {
+            sobranteEntregado: Number(cierreFinanciero.sobrante),
+            sobranteCalculado: Number(cierreFinanciero.efectivoFinal),
+            diferenciaSobrante: Number(cierreFinanciero.sobrante) - Number(cierreFinanciero.efectivoFinal),
+            saldoTarjetaReportado,
+            saldoTarjetaEsperado,
+            diferenciaTarjeta: Number(cierreFinanciero.diferencia),
+            bolsaAzulEsperada,
+            bolsaAzulReal,
+            diferenciaBolsaAzul,
+          };
+        })()
       : null,
   };
 }
