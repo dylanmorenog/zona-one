@@ -897,21 +897,22 @@ function SwitchRow({
       <button
         type="button"
         onClick={onToggle}
-        className={`relative shrink-0 w-10 h-6 rounded-full transition-colors duration-200 ${
-          activo ? colorActivo : "bg-gray-700"
+        style={{ backgroundColor: activo ? undefined : "#4b5563" }}
+        className={`relative shrink-0 w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none ${
+          activo ? colorActivo : ""
         }`}
       >
         <span
-          className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
-            activo ? "translate-x-5" : "translate-x-1"
+          className={`absolute top-0.5 left-0.5 block w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+            activo ? "translate-x-5" : "translate-x-0"
           }`}
         />
       </button>
-      <div>
+      <div className="min-w-0">
         <p className={`text-xs font-medium ${activo ? labelActivo : "text-gray-400"}`}>
           {label}
         </p>
-        <p className="text-xs text-gray-600">{desc}</p>
+        <p className="text-xs text-gray-500">{desc}</p>
       </div>
     </div>
   );
