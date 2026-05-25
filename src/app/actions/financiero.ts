@@ -219,11 +219,14 @@ export async function registrarMovimiento({
 
   // Verificar efectivo para retiros inmediatos (ingresoDirecto es siempre DEPOSITO, no aplica)
   if (tipo === "RETIRO" && estado === "COMPLETADO") {
-    const movimientosHoy = await prisma.movimientoFinanciero.findMany({
-      where: { hora: { gte: hoy, lt: manana } },
-    });
+    const [movimientosHoy, efectivoExtraHoy] = await Promise.all([
+      prisma.movimientoFinanciero.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
+      prisma.efectivoExtra.findMany({ where: { fecha: hoy } }),
+    ]);
+    const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
     const efectivoActual =
       Number(apertura.efectivoEmpleada) +
+      totalEfectivoExtra +
       movimientosHoy
         .filter((m) => !m.ingresoDirecto)
         .reduce(
@@ -275,16 +278,23 @@ export async function confirmarRetiro(movimientoId: number) {
   const apertura = await prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } });
   if (!apertura) throw new Error("Sin apertura del día");
 
-  const movimientosRestantes = await prisma.movimientoFinanciero.findMany({
-    where: { hora: { gte: hoy, lt: manana }, id: { not: movimientoId } },
-  });
+  const [movimientosRestantes, efectivoExtraHoy] = await Promise.all([
+    prisma.movimientoFinanciero.findMany({
+      where: { hora: { gte: hoy, lt: manana }, id: { not: movimientoId } },
+    }),
+    prisma.efectivoExtra.findMany({ where: { fecha: hoy } }),
+  ]);
+  const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
   const efectivoActual =
     Number(apertura.efectivoEmpleada) +
-    movimientosRestantes.reduce(
-      (a, m) =>
-        a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
-      0
-    );
+    totalEfectivoExtra +
+    movimientosRestantes
+      .filter((m) => !m.ingresoDirecto)
+      .reduce(
+        (a, m) =>
+          a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+        0
+      );
 
   const necesario = efectivoNecesarioRetiro(mov.tipoComision, Number(mov.monto), Number(mov.comision));
   if (necesario > efectivoActual) {
