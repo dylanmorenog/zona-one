@@ -2,7 +2,7 @@
 
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
-import { cajaChicaEfecto } from "@/lib/financiero";
+import { cajaChicaEfecto, efectivoEfecto, tarjetaEfecto } from "@/lib/financiero";
 
 function rangoFecha(fechaStr: string) {
   const [y, m, d] = fechaStr.split("-").map(Number);
@@ -12,6 +12,113 @@ function rangoFecha(fechaStr: string) {
     fecha: new Date(y, m - 1, d),
   };
 }
+
+// ─── Día actual en tiempo real ────────────────────────────────────────────────
+
+export async function getDiaActual() {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const hoy = new Date();
+  const inicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const fin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1);
+  const fechaDate = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+
+  const [
+    sesionesXbox, servicios, ventas, movimientos, gastos,
+    apertura, cierreDia, cierreFinanciero, configFinanciero, efectivoExtraHoy,
+  ] = await Promise.all([
+    prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
+    prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.ventaProducto.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.gasto.findMany({ where: { fecha: { gte: inicio, lt: fin } } }),
+    prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
+    prisma.cierreDia.findFirst({ where: { fecha: fechaDate } }),
+    prisma.cierreFinanciero.findFirst({ where: { fecha: fechaDate } }),
+    prisma.configFinanciero.findFirst(),
+    prisma.efectivoExtra.findMany({ where: { fecha: fechaDate } }),
+  ]);
+
+  const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
+  const totalServicios = servicios.reduce((a, s) => a + Number(s.total), 0);
+  const totalProductos = ventas.reduce((a, v) => a + Number(v.total), 0);
+  const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
+  const totalComisiones = movimientosNormales.reduce(
+    (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
+  );
+  const totalGastos = gastos.reduce((a, g) => a + Number(g.monto), 0);
+  const cajaChicaTotal = totalXbox + totalServicios + totalProductos + totalComisiones;
+
+  const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
+  const deltaEfectivo = movimientosNormales.reduce(
+    (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
+  );
+  const deltaTarjeta = movimientosNormales.reduce(
+    (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
+  );
+
+  const capital = configFinanciero ? Number(configFinanciero.capitalTotal) : null;
+  const efectivoEmpleada = apertura
+    ? Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo
+    : null;
+  const saldoTarjeta = apertura ? Number(apertura.saldoTarjetaInicial) + deltaTarjeta : null;
+  const bolsaAzul = capital !== null && saldoTarjeta !== null ? capital - saldoTarjeta : null;
+  const retirosPendientes = movimientos.filter(
+    (m) => m.tipo === "RETIRO" && m.estado === "PENDIENTE"
+  ).length;
+
+  const fechaStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
+
+  return {
+    fecha: fechaStr,
+    cerrado: !!cierreDia,
+    tieneApertura: !!apertura,
+    totalXbox,
+    totalServicios,
+    totalProductos,
+    totalComisiones,
+    totalGastos,
+    cajaChicaTotal,
+    efectivoEmpleada,
+    saldoTarjeta,
+    bolsaAzul,
+    capital,
+    retirosPendientes,
+    cierre: cierreDia
+      ? {
+          efectivoEsperado: Number(cierreDia.efectivoEsperado),
+          efectivoReal: Number(cierreDia.efectivoReal),
+          diferencia: Number(cierreDia.diferencia),
+        }
+      : null,
+    cierreFinanciero: cierreFinanciero
+      ? (() => {
+          const saldoTarjetaEsperado = Number(cierreFinanciero.saldoTarjetaEsperado);
+          const saldoTarjetaReportado = Number(cierreFinanciero.saldoTarjetaReal);
+          const bolsaAzulEsperada = capital !== null ? capital - saldoTarjetaEsperado : null;
+          const bolsaAzulReal = capital !== null ? capital - saldoTarjetaReportado : null;
+          return {
+            sobranteEntregado: Number(cierreFinanciero.sobrante),
+            sobranteCalculado: Number(cierreFinanciero.efectivoFinal),
+            diferenciaSobrante:
+              Number(cierreFinanciero.sobrante) - Number(cierreFinanciero.efectivoFinal),
+            saldoTarjetaEsperado,
+            saldoTarjetaReportado,
+            diferenciaTarjeta: Number(cierreFinanciero.diferencia),
+            bolsaAzulEsperada,
+            bolsaAzulReal,
+            diferenciaBolsaAzul:
+              bolsaAzulEsperada !== null && bolsaAzulReal !== null
+                ? bolsaAzulReal - bolsaAzulEsperada
+                : null,
+          };
+        })()
+      : null,
+  };
+}
+
+export type DiaActual = Awaited<ReturnType<typeof getDiaActual>>;
 
 // ─── Resumen de un día específico ────────────────────────────────────────────
 

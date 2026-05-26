@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  getDiaActual,
   getDiaSummary,
   getListaDias,
   getComparativoSemanal,
   getReporteMensual,
+  type DiaActual,
   type DiaSummary,
   type ComparativoRow,
   type ReporteMensual,
@@ -45,6 +47,10 @@ function mesLabel(mesStr: string) {
 export function HistorialPanel({ rol }: { rol: string }) {
   const esDueno = rol === "DUENO";
 
+  // Día actual
+  const [diaActual, setDiaActual] = useState<DiaActual | null>(null);
+  const [cargandoActual, setCargandoActual] = useState(true);
+
   // Lista paginada
   const [lista, setLista] = useState<ListaDiasResult | null>(null);
   const [cargandoLista, setCargandoLista] = useState(true);
@@ -62,6 +68,15 @@ export function HistorialPanel({ rol }: { rol: string }) {
   const [cargandoReportes, setCargandoReportes] = useState(false);
 
   const [errorLista, setErrorLista] = useState<string | null>(null);
+
+  async function cargarActual() {
+    setCargandoActual(true);
+    try {
+      const data = await getDiaActual();
+      setDiaActual(data);
+    } catch { /* silencioso */ }
+    finally { setCargandoActual(false); }
+  }
 
   async function cargarLista(p: number) {
     setCargandoLista(true);
@@ -101,6 +116,7 @@ export function HistorialPanel({ rol }: { rol: string }) {
   }
 
   useEffect(() => {
+    cargarActual();
     cargarLista(1);
     if (esDueno) cargarReportes();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -118,6 +134,20 @@ export function HistorialPanel({ rol }: { rol: string }) {
       <div className="flex items-center justify-between gap-4">
         <div />
         {esDueno && <ExportarExcel />}
+      </div>
+
+      {/* Día actual — siempre visible */}
+      <DiaActualCard
+        data={diaActual}
+        cargando={cargandoActual}
+        onRefrescar={cargarActual}
+      />
+
+      {/* Separador */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 border-t border-gray-800" />
+        <span className="text-xs text-gray-600 uppercase tracking-wider">Historial</span>
+        <div className="flex-1 border-t border-gray-800" />
       </div>
 
       {/* Lista paginada de días */}
@@ -148,6 +178,202 @@ export function HistorialPanel({ rol }: { rol: string }) {
           {reporte !== null && <ReporteMensualView reporte={reporte} />}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Día actual ───────────────────────────────────────────────────────────────
+
+function DiaActualCard({
+  data,
+  cargando,
+  onRefrescar,
+}: {
+  data: DiaActual | null;
+  cargando: boolean;
+  onRefrescar: () => void;
+}) {
+  const hoyLabel = (() => {
+    const d = new Date();
+    const s = d.toLocaleDateString("es-MX", {
+      weekday: "long", day: "numeric", month: "long",
+    });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  })();
+
+  return (
+    <div className={`rounded-xl border bg-gray-900 overflow-hidden ${
+      data?.cerrado ? "border-gray-700" : "border-brand-600/40"
+    }`}>
+      {/* Header */}
+      <div className={`flex items-center justify-between px-4 py-3 border-b ${
+        data?.cerrado ? "border-gray-800" : "border-brand-600/20"
+      }`}>
+        <div className="flex items-center gap-2.5">
+          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-full ${
+            data?.cerrado
+              ? "bg-gray-800 text-gray-400"
+              : "bg-brand-600/20 text-brand-400"
+          }`}>
+            {data?.cerrado ? "Cerrado" : "● Hoy"}
+          </span>
+          <span className="text-sm font-medium text-white">{hoyLabel}</span>
+          {data && !data.cerrado && data.retirosPendientes > 0 && (
+            <span className="text-xs font-medium bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full">
+              {data.retirosPendientes} pendiente{data.retirosPendientes !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onRefrescar}
+          disabled={cargando}
+          className="text-xs text-gray-500 hover:text-gray-300 transition disabled:opacity-40"
+        >
+          {cargando ? "..." : "↺ Actualizar"}
+        </button>
+      </div>
+
+      {cargando && !data && (
+        <div className="px-4 py-6 text-center">
+          <p className="text-sm text-gray-600">Cargando...</p>
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Datos del día */}
+          <div className="grid grid-cols-2 divide-x divide-gray-800/60">
+            {/* Caja chica */}
+            <div className="p-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
+                Caja chica del día
+              </p>
+              <FilaArea label="Xbox" value={data.totalXbox} color="text-violet-400" />
+              <FilaArea label="Servicios" value={data.totalServicios} color="text-sky-400" />
+              <FilaArea label="Productos" value={data.totalProductos} color="text-amber-400" />
+              <FilaArea label="Comisiones" value={data.totalComisiones} color="text-emerald-400" />
+              <div className="pt-2 border-t border-gray-800 flex items-center justify-between">
+                <span className="text-xs text-gray-400">Total</span>
+                <span className="text-base font-bold text-white">${fmt(data.cajaChicaTotal)}</span>
+              </div>
+              {data.totalGastos > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-600">Gastos</span>
+                  <span className="text-xs text-red-400">−${fmt(data.totalGastos)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Financiero */}
+            <div className="p-4 space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
+                Financiero
+              </p>
+              {data.tieneApertura ? (
+                <>
+                  <FilaArea label="Efectivo empleada" value={data.efectivoEmpleada!} color="text-white" />
+                  <FilaArea label="Tarjeta (esperado)" value={data.saldoTarjeta!} color="text-white" />
+                  {data.bolsaAzul !== null && (
+                    <FilaArea label="Bolsa azul" value={data.bolsaAzul} color="text-blue-400" />
+                  )}
+                  {!data.cerrado && data.retirosPendientes > 0 && (
+                    <p className="text-xs text-amber-400 pt-1">
+                      {data.retirosPendientes} retiro{data.retirosPendientes !== 1 ? "s" : ""} sin entregar
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-gray-600">Sin apertura financiero</p>
+              )}
+            </div>
+          </div>
+
+          {/* Cuentas del cierre — solo si cerrado */}
+          {data.cerrado && data.cierre && (
+            <div className="border-t border-gray-800">
+              <div className="px-4 py-2.5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Cuentas del cierre
+                </p>
+              </div>
+              <div className="divide-y divide-gray-800/60">
+                <FilaCuenta
+                  numero={1}
+                  label="Caja chica física"
+                  entregado={data.cierre.efectivoReal}
+                  esperado={data.cierre.efectivoEsperado}
+                  diferencia={data.cierre.diferencia}
+                />
+                {data.cierreFinanciero ? (
+                  <>
+                    <FilaCuenta
+                      numero={2}
+                      label="Sobrante → caja azul"
+                      entregado={data.cierreFinanciero.sobranteEntregado}
+                      esperado={data.cierreFinanciero.sobranteCalculado}
+                      diferencia={data.cierreFinanciero.diferenciaSobrante}
+                    />
+                    <FilaCuenta
+                      numero={3}
+                      label="Saldo en tarjeta"
+                      entregado={data.cierreFinanciero.saldoTarjetaReportado}
+                      esperado={data.cierreFinanciero.saldoTarjetaEsperado}
+                      diferencia={data.cierreFinanciero.diferenciaTarjeta}
+                    />
+                    {data.cierreFinanciero.bolsaAzulEsperada !== null &&
+                      data.cierreFinanciero.bolsaAzulReal !== null && (
+                        <FilaCuenta
+                          numero={4}
+                          label="Bolsa azul"
+                          entregado={data.cierreFinanciero.bolsaAzulReal}
+                          esperado={data.cierreFinanciero.bolsaAzulEsperada}
+                          diferencia={data.cierreFinanciero.diferenciaBolsaAzul ?? 0}
+                        />
+                      )}
+                  </>
+                ) : (
+                  <div className="px-4 py-3">
+                    <p className="text-xs text-gray-600">Sin apertura financiero ese día</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function FilaArea({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={`text-xs font-semibold ${color}`}>${fmt(value)}</span>
+    </div>
+  );
+}
+
+function FilaCuenta({
+  numero, label, entregado, esperado, diferencia,
+}: {
+  numero: number; label: string; entregado: number; esperado: number; diferencia: number;
+}) {
+  const cuadra = Math.abs(diferencia) < 0.01;
+  return (
+    <div className="flex items-center justify-between px-4 py-3 gap-4">
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <span className="text-xs text-gray-600">{numero}.</span>
+          <span className="text-sm text-gray-300">{label}</span>
+        </div>
+        <p className="text-xs text-gray-600">
+          Real: ${fmt(entregado)} · Esperado: ${fmt(esperado)}
+        </p>
+      </div>
+      <span className={`text-sm font-semibold shrink-0 ${cuadra ? "text-emerald-400" : "text-red-400"}`}>
+        {cuadra ? "✓ Cuadra" : `${diferencia > 0 ? "+" : ""}$${fmt(diferencia)}`}
+      </span>
     </div>
   );
 }
