@@ -99,20 +99,51 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
     }
   }
 
+  const [busqueda, setBusqueda] = useState("");
+  const busquedaRef = useRef<HTMLInputElement>(null);
+
   return (
     <div className="flex flex-col h-full gap-4">
-      <div className="flex gap-1 rounded-xl border border-gray-800 bg-gray-900 p-1 w-fit">
-        {(["venta", "inventario"] as Vista[]).map((v) => (
-          <button
-            key={v}
-            onClick={() => setVista(v)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
-              vista === v ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
-            }`}
+      <div className="flex items-center gap-3">
+        <div className="flex gap-1 rounded-xl border border-gray-800 bg-gray-900 p-1 w-fit shrink-0">
+          {(["venta", "inventario"] as Vista[]).map((v) => (
+            <button
+              key={v}
+              onClick={() => setVista(v)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${
+                vista === v ? "bg-gray-800 text-white" : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {v === "venta" ? "Venta" : "Inventario"}
+            </button>
+          ))}
+        </div>
+
+        {/* Buscador */}
+        <div className="relative flex-1 max-w-xs">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none"
+            fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
           >
-            {v === "venta" ? "Venta" : "Inventario"}
-          </button>
-        ))}
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            ref={busquedaRef}
+            type="text"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar producto..."
+            className="w-full rounded-xl border border-gray-800 bg-gray-900 py-1.5 pl-9 pr-8 text-sm text-white placeholder-gray-600 focus:border-gray-600 focus:outline-none"
+          />
+          {busqueda && (
+            <button
+              onClick={() => { setBusqueda(""); busquedaRef.current?.focus(); }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-lg leading-none"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -126,6 +157,7 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
           productos={productos.filter((p) => p.activo)}
           ventasHoy={ventasHoy}
           totalHoy={totalHoy}
+          busqueda={busqueda}
           onSeleccionar={setModalVenta}
         />
       )}
@@ -134,6 +166,7 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
         <VistaInventario
           productos={productos}
           categoriasCustom={categoriasCustom}
+          busqueda={busqueda}
           esDueno={esDueno}
           onEntrada={setModalEntrada}
           onEditar={(p) => setModalProducto(p)}
@@ -214,11 +247,13 @@ function VistaVenta({
   productos,
   ventasHoy,
   totalHoy,
+  busqueda,
   onSeleccionar,
 }: {
   productos: Producto[];
   ventasHoy: VentaHoy[];
   totalHoy: number;
+  busqueda: string;
   onSeleccionar: (p: Producto) => void;
 }) {
   const [filtro, setFiltro] = useState<Filtro>("TODOS");
@@ -228,8 +263,12 @@ function VistaVenta({
     (f) => f === "TODOS" || categoriasConProductos.has(f)
   );
 
-  const productosFiltrados =
-    filtro === "TODOS" ? productos : productos.filter((p) => p.categoria === filtro);
+  const q = busqueda.trim().toLowerCase();
+  const productosFiltrados = (() => {
+    const porCategoria = filtro === "TODOS" ? productos : productos.filter((p) => p.categoria === filtro);
+    if (!q) return porCategoria;
+    return productos.filter((p) => p.nombre.toLowerCase().includes(q));
+  })();
 
   return (
     <div className="flex gap-5 flex-1 min-h-0">
@@ -261,7 +300,7 @@ function VistaVenta({
         <div className="flex-1 overflow-y-auto rounded-xl border border-gray-800 bg-gray-900">
           {productosFiltrados.length === 0 ? (
             <div className="flex h-32 items-center justify-center text-sm text-gray-600">
-              Sin productos en esta categoría
+              {q ? `Sin resultados para "${busqueda}"` : "Sin productos en esta categoría"}
             </div>
           ) : (
             <div className="divide-y divide-gray-800/60">
@@ -376,6 +415,7 @@ function VistaVenta({
 function VistaInventario({
   productos,
   categoriasCustom,
+  busqueda,
   esDueno,
   onEntrada,
   onEditar,
@@ -386,6 +426,7 @@ function VistaInventario({
 }: {
   productos: Producto[];
   categoriasCustom: { id: number; nombre: string }[];
+  busqueda: string;
   esDueno: boolean;
   onEntrada: (p: Producto) => void;
   onEditar: (p: Producto) => void;
@@ -407,10 +448,12 @@ function VistaInventario({
   const cols = esDueno ? colsDueno : colsEmpleado;
 
   // Build category groups preserving DB order
+  const q = busqueda.trim().toLowerCase();
   type Grupo = { key: string; label: string; badge: string; productos: Producto[] };
   const grupos: Grupo[] = [];
   const grupoMap = new Map<string, Grupo>();
   for (const p of productos) {
+    if (q && !p.nombre.toLowerCase().includes(q)) continue;
     const key = p.categoriaExtra ? `custom:${p.categoriaExtra}` : p.categoria;
     const cfg = getCatDisplay(p);
     if (!grupoMap.has(key)) {
@@ -612,9 +655,9 @@ function VistaInventario({
             </div>
           ))}
 
-          {productos.length === 0 && (
+          {grupos.length === 0 && (
             <div className="flex h-32 items-center justify-center text-sm text-gray-600">
-              Sin productos registrados
+              {q ? `Sin resultados para "${busqueda}"` : "Sin productos registrados"}
             </div>
           )}
         </div>
