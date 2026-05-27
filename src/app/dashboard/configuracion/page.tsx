@@ -7,6 +7,7 @@ import {
   getCategoriasGasto,
   getCategoriasProducto,
   getCategoriasDefaultDeshabilitadas,
+  getRespaldosReinicio,
 } from "@/app/actions/configuracion";
 import { ConfiguracionPanel } from "@/components/configuracion/ConfiguracionPanel";
 import { redirect } from "next/navigation";
@@ -15,7 +16,7 @@ export default async function ConfiguracionPage() {
   const session = await getSession();
   if (session?.rol !== "DUENO") redirect("/dashboard");
 
-  const [{ config: configXbox, consolas }, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto, categoriasDefaultDeshabilitadas] =
+  const [{ config: configXbox, consolas }, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto, categoriasDefaultDeshabilitadas, respaldosReinicio] =
     await Promise.all([
       getConfigXbox(),
       getServicios(),
@@ -24,6 +25,7 @@ export default async function ConfiguracionPage() {
       getCategoriasGasto(),
       getCategoriasProducto(),
       getCategoriasDefaultDeshabilitadas(),
+      getRespaldosReinicio(),
     ]);
 
   return (
@@ -42,6 +44,7 @@ export default async function ConfiguracionPage() {
           categoriasGasto={categoriasGasto}
           categoriasProducto={categoriasProducto}
           categoriasDefaultDeshabilitadas={categoriasDefaultDeshabilitadas}
+          respaldosReinicio={respaldosReinicio}
         />
       </div>
     </div>

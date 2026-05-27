@@ -19,6 +19,9 @@ import {
   deleteCategoriaProductoConReasignacion,
   updateCategoriaProducto,
   deshabilitarCategoriaDefault,
+  reiniciarDia,
+  getRespaldosReinicio,
+  getRespaldoDetalle,
 } from "@/app/actions/configuracion";
 import { fmt } from "@/lib/financiero";
 
@@ -46,6 +49,13 @@ interface Producto { id: number; nombre: string; categoria: CategoriaProducto; c
 interface CategoriaGasto { id: number; nombre: string; esDefault: boolean; activa: boolean }
 interface CategoriaProductoCustom { id: number; nombre: string }
 
+interface RespaldoResumen {
+  id: number;
+  fecha: string;
+  creadoEn: string;
+  empleadoNombre: string;
+}
+
 interface Props {
   configXbox: ConfigXboxData | null;
   consolas: Consola[];
@@ -55,6 +65,7 @@ interface Props {
   categoriasGasto: CategoriaGasto[];
   categoriasProducto: CategoriaProductoCustom[];
   categoriasDefaultDeshabilitadas: string[];
+  respaldosReinicio: RespaldoResumen[];
 }
 
 // ─── Componentes utilitarios ──────────────────────────────────────────────────
@@ -1048,10 +1059,341 @@ function SeccionGastos({ categorias: initialCats }: { categorias: CategoriaGasto
   );
 }
 
+// ─── Sección Reiniciar Día ────────────────────────────────────────────────────
+
+function SeccionReiniciarDia({ respaldosIniciales }: { respaldosIniciales: RespaldoResumen[] }) {
+  const [respaldos, setRespaldos] = useState<RespaldoResumen[]>(respaldosIniciales);
+
+  // Modal confirmación
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const [pin, setPin] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState(false);
+
+  // Modal detalle de respaldo
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
+  const [detalle, setDetalle] = useState<Awaited<ReturnType<typeof getRespaldoDetalle>> | null>(null);
+  const [cargandoDetalle, setCargandoDetalle] = useState(false);
+
+  function abrirModal() {
+    setPin("");
+    setError("");
+    setOk(false);
+    setModalAbierto(true);
+  }
+
+  async function confirmarReinicio() {
+    if (!pin.trim()) { setError("Ingresa el PIN"); return; }
+    setCargando(true);
+    setError("");
+    try {
+      await reiniciarDia(pin.trim());
+      setOk(true);
+      setModalAbierto(false);
+      setPin("");
+      // Refrescar lista de respaldos
+      const nuevos = await getRespaldosReinicio();
+      setRespaldos(nuevos);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al reiniciar");
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  async function verDetalle(id: number) {
+    setCargandoDetalle(true);
+    setDetalleAbierto(true);
+    setDetalle(null);
+    try {
+      const d = await getRespaldoDetalle(id);
+      setDetalle(d);
+    } catch {
+      setDetalleAbierto(false);
+    } finally {
+      setCargandoDetalle(false);
+    }
+  }
+
+  return (
+    <Seccion titulo="Reiniciar día">
+      <div className="px-5 py-4 space-y-4">
+        {/* Advertencia */}
+        <div className="rounded-lg border border-red-800/50 bg-red-950/20 px-4 py-3">
+          <p className="text-sm font-semibold text-red-400 mb-1">⚠ Zona de peligro</p>
+          <p className="text-xs text-red-400/70 leading-relaxed">
+            Esta acción borra todos los registros del día actual (Xbox, servicios, productos, movimientos financieros y apertura), restaura el stock de productos y deja el día listo para empezar de nuevo. Se guarda un respaldo completo antes de borrar.
+          </p>
+        </div>
+
+        {ok && (
+          <div className="rounded-lg border border-emerald-800/50 bg-emerald-950/20 px-4 py-2 text-sm text-emerald-400">
+            ✓ Día reiniciado correctamente. Se guardó un respaldo completo.
+          </div>
+        )}
+
+        <button
+          onClick={abrirModal}
+          className="rounded-lg border border-red-800 bg-red-950/40 px-4 py-2.5 text-sm font-semibold text-red-400 hover:bg-red-950/60 transition"
+        >
+          Reiniciar día actual
+        </button>
+
+        {/* Lista de respaldos */}
+        {respaldos.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Respaldos anteriores</p>
+            <div className="divide-y divide-gray-800/60 rounded-lg border border-gray-800 bg-gray-800/30">
+              {respaldos.map((r) => {
+                const horaLocal = new Date(r.creadoEn).toLocaleString("es-MX", {
+                  timeZone: "America/Mexico_City",
+                  dateStyle: "short",
+                  timeStyle: "short",
+                });
+                return (
+                  <div key={r.id} className="flex items-center justify-between px-4 py-3 gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-white">{r.fecha}</p>
+                      <p className="text-xs text-gray-500">{horaLocal} · {r.empleadoNombre}</p>
+                    </div>
+                    <button
+                      onClick={() => verDetalle(r.id)}
+                      className="shrink-0 rounded-md border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 transition"
+                    >
+                      Ver detalle
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal de confirmación + PIN */}
+      {modalAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => { if (!cargando) { setModalAbierto(false); setPin(""); setError(""); } }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-red-800/60 bg-gray-900 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-red-950/60 text-xl">⚠</span>
+              <div>
+                <h2 className="text-base font-bold text-red-400">Reiniciar día actual</h2>
+                <p className="text-xs text-gray-500">Esta acción no se puede deshacer</p>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-lg bg-gray-800/60 px-4 py-3 text-xs text-gray-400 space-y-1 leading-relaxed">
+              <p>Se eliminarán todos los registros de hoy:</p>
+              <ul className="mt-1.5 space-y-0.5 text-gray-500">
+                <li>· Sesiones Xbox del día</li>
+                <li>· Servicios registrados</li>
+                <li>· Ventas de productos (stock restaurado)</li>
+                <li>· Movimientos financieros y apertura</li>
+                <li>· Gastos del día</li>
+              </ul>
+              <p className="mt-2 text-emerald-500/80">✓ Se guarda un respaldo completo antes de borrar</p>
+            </div>
+
+            <div className="mb-4">
+              <label className="mb-1.5 block text-xs text-gray-400">PIN del dueño para confirmar</label>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") confirmarReinicio(); }}
+                autoFocus
+                placeholder="••••"
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2.5 text-center text-lg tracking-widest text-white focus:border-red-700 focus:outline-none"
+              />
+            </div>
+
+            {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setModalAbierto(false); setPin(""); setError(""); }}
+                disabled={cargando}
+                className="flex-1 rounded-lg border border-gray-700 py-2.5 text-sm font-medium text-gray-400 hover:bg-gray-800 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmarReinicio}
+                disabled={cargando || !pin.trim()}
+                className="flex-1 rounded-lg bg-red-700 py-2.5 text-sm font-bold text-white hover:bg-red-600 disabled:opacity-40"
+              >
+                {cargando ? "Reiniciando..." : "Confirmar y reiniciar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de detalle de respaldo */}
+      {detalleAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setDetalleAbierto(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {cargandoDetalle || !detalle ? (
+              <div className="flex h-32 items-center justify-center text-sm text-gray-500">Cargando...</div>
+            ) : (
+              <>
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-bold text-white">Respaldo del {detalle.fecha}</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Reiniciado el{" "}
+                      {new Date(detalle.creadoEn).toLocaleString("es-MX", {
+                        timeZone: "America/Mexico_City",
+                        dateStyle: "long",
+                        timeStyle: "short",
+                      })}{" "}
+                      por {detalle.empleadoNombre}
+                    </p>
+                  </div>
+                  <button onClick={() => setDetalleAbierto(false)} className="shrink-0 text-gray-500 hover:text-white text-xl leading-none">✕</button>
+                </div>
+
+                {/* Resumen de totales */}
+                <div className="grid grid-cols-2 gap-2 mb-4">
+                  {[
+                    { label: "Sesiones Xbox", valor: detalle.datos.sesionesXbox?.length ?? 0, sufijo: "" },
+                    { label: "Servicios", valor: detalle.datos.servicios?.length ?? 0, sufijo: "" },
+                    { label: "Ventas productos", valor: detalle.datos.ventasProducto?.length ?? 0, sufijo: "" },
+                    { label: "Movimientos financ.", valor: detalle.datos.movimientosFinanciero?.length ?? 0, sufijo: "" },
+                  ].map(({ label, valor, sufijo }) => (
+                    <div key={label} className="rounded-lg bg-gray-800/50 px-3 py-2">
+                      <p className="text-xs text-gray-500">{label}</p>
+                      <p className="text-lg font-bold text-white">{valor}{sufijo}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Apertura */}
+                {detalle.datos.aperturaFinanciero && (
+                  <div className="mb-3 rounded-lg border border-gray-800 bg-gray-800/30 px-4 py-3">
+                    <p className="text-xs font-semibold text-gray-400 mb-1">Apertura financiera</p>
+                    <div className="flex gap-6 text-sm">
+                      <span className="text-gray-300">
+                        Efectivo: <span className="font-semibold text-white">${Number(detalle.datos.aperturaFinanciero.efectivoEmpleada ?? 0).toLocaleString("es-MX")}</span>
+                      </span>
+                      <span className="text-gray-300">
+                        Tarjeta inicial: <span className="font-semibold text-white">${Number(detalle.datos.aperturaFinanciero.saldoTarjetaInicial ?? 0).toLocaleString("es-MX")}</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sesiones Xbox */}
+                {detalle.datos.sesionesXbox?.length > 0 && (
+                  <DetalleTabla
+                    titulo="Sesiones Xbox"
+                    filas={detalle.datos.sesionesXbox.map((s) => [
+                      String(s.consolaId ?? ""),
+                      `${s.duracionMinutos ?? "—"} min`,
+                      `$${Number(s.total ?? 0).toLocaleString("es-MX")}`,
+                    ])}
+                    headers={["Consola", "Duración", "Total"]}
+                  />
+                )}
+
+                {/* Servicios */}
+                {detalle.datos.servicios?.length > 0 && (
+                  <DetalleTabla
+                    titulo="Servicios"
+                    filas={detalle.datos.servicios.map((s) => [
+                      String(s.tipoId ?? ""),
+                      String(s.cantidad ?? 1),
+                      `$${Number(s.total ?? 0).toLocaleString("es-MX")}`,
+                    ])}
+                    headers={["Tipo", "Cant.", "Total"]}
+                  />
+                )}
+
+                {/* Ventas */}
+                {detalle.datos.ventasProducto?.length > 0 && (
+                  <DetalleTabla
+                    titulo="Ventas de productos"
+                    filas={detalle.datos.ventasProducto.map((v) => [
+                      String(v.productoId ?? ""),
+                      String(v.cantidad ?? 1),
+                      `$${Number(v.total ?? 0).toLocaleString("es-MX")}`,
+                    ])}
+                    headers={["Producto", "Cant.", "Total"]}
+                  />
+                )}
+
+                {/* Movimientos */}
+                {detalle.datos.movimientosFinanciero?.length > 0 && (
+                  <DetalleTabla
+                    titulo="Movimientos financieros"
+                    filas={detalle.datos.movimientosFinanciero.map((m) => [
+                      String(m.tipo ?? ""),
+                      String(m.estado ?? ""),
+                      `$${Number(m.monto ?? 0).toLocaleString("es-MX")}`,
+                    ])}
+                    headers={["Tipo", "Estado", "Monto"]}
+                  />
+                )}
+
+                <button
+                  onClick={() => setDetalleAbierto(false)}
+                  className="mt-4 w-full rounded-lg border border-gray-700 py-2.5 text-sm text-gray-400 hover:bg-gray-800 transition"
+                >
+                  Cerrar
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </Seccion>
+  );
+}
+
+function DetalleTabla({
+  titulo,
+  headers,
+  filas,
+}: {
+  titulo: string;
+  headers: string[];
+  filas: string[][];
+}) {
+  return (
+    <div className="mb-3">
+      <p className="text-xs font-semibold text-gray-400 mb-1.5">{titulo}</p>
+      <div className="rounded-lg border border-gray-800 overflow-hidden">
+        <div className={`grid gap-2 px-3 py-1.5 bg-gray-800/50 text-xs font-semibold text-gray-500`} style={{ gridTemplateColumns: `repeat(${headers.length}, 1fr)` }}>
+          {headers.map((h) => <span key={h}>{h}</span>)}
+        </div>
+        {filas.map((fila, i) => (
+          <div key={i} className={`grid gap-2 px-3 py-2 text-xs text-gray-300 border-t border-gray-800/60`} style={{ gridTemplateColumns: `repeat(${fila.length}, 1fr)` }}>
+            {fila.map((celda, j) => <span key={j}>{celda}</span>)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Panel principal ──────────────────────────────────────────────────────────
 
 export function ConfiguracionPanel({
-  configXbox, consolas, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto, categoriasDefaultDeshabilitadas,
+  configXbox, consolas, servicios, productos, configFinanciero, categoriasGasto, categoriasProducto, categoriasDefaultDeshabilitadas, respaldosReinicio,
 }: Props) {
   return (
     <div className="space-y-4 pb-6">
@@ -1064,6 +1406,7 @@ export function ConfiguracionPanel({
       />
       <SeccionFinanciero configFinanciero={configFinanciero} />
       <SeccionGastos categorias={categoriasGasto} />
+      <SeccionReiniciarDia respaldosIniciales={respaldosReinicio} />
     </div>
   );
 }

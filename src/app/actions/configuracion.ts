@@ -2,6 +2,8 @@
 
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
+import { getMexicoDia } from "@/lib/fecha";
+import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 
 async function requireDueno() {
@@ -311,4 +313,134 @@ export async function deleteCategoriaGasto(id: number) {
   if (cat?.esDefault) throw new Error("No se pueden eliminar las categorías predeterminadas");
   await prisma.categoriaGasto.delete({ where: { id } });
   revalidatePath("/dashboard/configuracion");
+}
+
+// ─── Reinicio de día con respaldo ─────────────────────────────────────────────
+
+export async function reiniciarDia(pin: string) {
+  const session = await requireDueno();
+
+  // Verificar PIN del dueño
+  const hashCorrecto = process.env.PIN_DUENO_HASH;
+  if (!hashCorrecto) throw new Error("Configuración de PIN no encontrada");
+  const pinValido = await bcrypt.compare(pin, hashCorrecto);
+  if (!pinValido) throw new Error("PIN incorrecto");
+
+  const { fechaDate, inicio, fin } = getMexicoDia();
+
+  const empleado = await prisma.usuario.findFirst({
+    where: { rol: "DUENO", activo: true },
+    select: { id: true },
+  });
+  if (!empleado) throw new Error("Usuario no encontrado");
+
+  // Recopilar todos los datos del día para el respaldo
+  const [
+    sesionesXbox,
+    servicios,
+    ventasProducto,
+    movimientos,
+    apertura,
+    cierreFinanciero,
+    cierreDia,
+    gastos,
+    efectivosExtra,
+  ] = await Promise.all([
+    prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin } } }),
+    prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.ventaProducto.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
+    prisma.cierreFinanciero.findFirst({ where: { fecha: fechaDate } }),
+    prisma.cierreDia.findFirst({ where: { fecha: fechaDate } }),
+    prisma.gasto.findMany({ where: { fecha: fechaDate } }),
+    prisma.efectivoExtra.findMany({ where: { fecha: fechaDate } }),
+  ]);
+
+  // Serializar todo a JSON puro (Decimal → number, Date → string)
+  const datos = JSON.parse(
+    JSON.stringify({
+      sesionesXbox,
+      servicios,
+      ventasProducto,
+      movimientosFinanciero: movimientos,
+      aperturaFinanciero: apertura,
+      cierreFinanciero,
+      cierreDia,
+      gastos,
+      efectivosExtra,
+    })
+  );
+
+  // Transacción: crear respaldo + restaurar stock + borrar registros del día
+  await prisma.$transaction(async (tx) => {
+    // 1. Guardar respaldo
+    await tx.respaldoReinicio.create({
+      data: { fecha: fechaDate, empleadoId: empleado.id, datos },
+    });
+
+    // 2. Restaurar stock de productos vendidos hoy
+    for (const venta of ventasProducto) {
+      await tx.producto.update({
+        where: { id: venta.productoId },
+        data: { stockActual: { increment: venta.cantidad } },
+      });
+    }
+
+    // 3. Borrar registros del día en orden correcto
+    await tx.cierreFinanciero.deleteMany({ where: { fecha: fechaDate } });
+    await tx.cierreDia.deleteMany({ where: { fecha: fechaDate } });
+    await tx.movimientoFinanciero.deleteMany({ where: { hora: { gte: inicio, lt: fin } } });
+    await tx.efectivoExtra.deleteMany({ where: { fecha: fechaDate } });
+    await tx.aperturaFinanciero.deleteMany({ where: { fecha: fechaDate } });
+    await tx.ventaProducto.deleteMany({ where: { hora: { gte: inicio, lt: fin } } });
+    await tx.servicio.deleteMany({ where: { hora: { gte: inicio, lt: fin } } });
+    await tx.sesionXbox.deleteMany({ where: { inicio: { gte: inicio, lt: fin } } });
+    await tx.gasto.deleteMany({ where: { fecha: fechaDate } });
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/configuracion");
+  revalidatePath("/dashboard/financiero");
+  revalidatePath("/dashboard/xbox");
+  revalidatePath("/dashboard/servicios");
+  revalidatePath("/dashboard/productos");
+  revalidatePath("/dashboard/historial");
+}
+
+export async function getRespaldosReinicio() {
+  await requireDueno();
+  const respaldos = await prisma.respaldoReinicio.findMany({
+    orderBy: { creadoEn: "desc" },
+    include: { empleado: { select: { nombre: true } } },
+  });
+  return respaldos.map((r) => ({
+    id: r.id,
+    fecha: r.fecha.toISOString().split("T")[0],
+    creadoEn: r.creadoEn.toISOString(),
+    empleadoNombre: r.empleado.nombre,
+  }));
+}
+
+export async function getRespaldoDetalle(id: number) {
+  await requireDueno();
+  const respaldo = await prisma.respaldoReinicio.findUnique({
+    where: { id },
+    include: { empleado: { select: { nombre: true } } },
+  });
+  if (!respaldo) throw new Error("Respaldo no encontrado");
+  return {
+    id: respaldo.id,
+    fecha: respaldo.fecha.toISOString().split("T")[0],
+    creadoEn: respaldo.creadoEn.toISOString(),
+    empleadoNombre: respaldo.empleado.nombre,
+    datos: respaldo.datos as {
+      sesionesXbox: Record<string, unknown>[];
+      servicios: Record<string, unknown>[];
+      ventasProducto: Record<string, unknown>[];
+      movimientosFinanciero: Record<string, unknown>[];
+      aperturaFinanciero: Record<string, unknown> | null;
+      gastos: Record<string, unknown>[];
+    },
+  };
 }

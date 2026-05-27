@@ -33,6 +33,7 @@ model Usuario {
   cierresFinanciero      CierreFinanciero[]
   gastos                 Gasto[]
   efectivosExtra         EfectivoExtra[]
+  respaldosReinicio      RespaldoReinicio[]
 
   @@map("usuarios")
 }
@@ -330,4 +331,17 @@ model EfectivoExtra {
   empleado   Usuario  @relation(fields: [empleadoId], references: [id])
 
   @@map("efectivo_extra")
+}
+
+// ─── RESPALDOS DE REINICIO ────────────────────────────────────────────────────
+
+model RespaldoReinicio {
+  id         Int      @id @default(autoincrement())
+  fecha      DateTime @db.Date
+  creadoEn   DateTime @default(now()) @map("creado_en")
+  empleadoId Int      @map("empleado_id")
+  empleado   Usuario  @relation(fields: [empleadoId], references: [id])
+  datos      Json
+
+  @@map("respaldos_reinicio")
 }
