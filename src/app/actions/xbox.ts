@@ -3,6 +3,7 @@
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
 import { calcularMontoXbox } from "@/lib/xbox";
+import { getMexicoDia } from "@/lib/fecha";
 import { revalidatePath } from "next/cache";
 
 export async function getConsolasConSesiones() {
@@ -59,9 +60,8 @@ export async function iniciarSesionXbox(
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
 
-  const hoy = new Date();
-  const hoyInicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  if (await prisma.cierreDia.findFirst({ where: { fecha: hoyInicio } })) {
+  const { fechaDate } = getMexicoDia();
+  if (await prisma.cierreDia.findFirst({ where: { fecha: fechaDate } })) {
     throw new Error("El día ya fue cerrado. Las operaciones reanudan mañana.");
   }
 

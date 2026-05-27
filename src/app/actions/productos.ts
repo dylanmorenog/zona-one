@@ -2,18 +2,11 @@
 
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
+import { getMexicoDia } from "@/lib/fecha";
 import { revalidatePath } from "next/cache";
 
-function inicioFinDia() {
-  const hoy = new Date();
-  return {
-    inicio: new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()),
-    fin: new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1),
-  };
-}
-
 export async function getDatosProductos() {
-  const { inicio, fin } = inicioFinDia();
+  const { inicio, fin } = getMexicoDia();
 
   const [productos, ventasHoy, categoriasCustom] = await Promise.all([
     prisma.producto.findMany({ orderBy: [{ categoria: "asc" }, { categoriaExtra: "asc" }, { nombre: "asc" }] }),
@@ -73,9 +66,8 @@ export async function registrarVentaProducto({
   if (!Number.isInteger(cantidad) || cantidad <= 0)
     throw new Error("La cantidad debe ser un número entero mayor a 0");
 
-  const hoy = new Date();
-  const hoyInicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  if (await prisma.cierreDia.findFirst({ where: { fecha: hoyInicio } })) {
+  const { fechaDate } = getMexicoDia();
+  if (await prisma.cierreDia.findFirst({ where: { fecha: fechaDate } })) {
     throw new Error("El día ya fue cerrado. Las operaciones reanudan mañana.");
   }
 

@@ -3,12 +3,8 @@
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
 import { cajaChicaEfecto, efectivoEfecto, tarjetaEfecto } from "@/lib/financiero";
+import { getMexicoDia } from "@/lib/fecha";
 import { revalidatePath } from "next/cache";
-
-function hoyDate() {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
 
 async function getEmpleadoId(rol: string) {
   const u = await prisma.usuario.findFirst({ where: { rol: rol as "DUENO" | "EMPLEADO", activo: true } });
@@ -17,8 +13,7 @@ async function getEmpleadoId(rol: string) {
 }
 
 export async function getPanelDia() {
-  const hoy = hoyDate();
-  const manana = new Date(hoy.getTime() + 86400000);
+  const { fechaDate, inicio, fin } = getMexicoDia();
 
   const [
     sesionesXboxHoy,
@@ -33,20 +28,20 @@ export async function getPanelDia() {
     gastosHoy,
     configFinanciero,
   ] = await Promise.all([
-    prisma.sesionXbox.findMany({ where: { inicio: { gte: hoy, lt: manana }, fin: { not: null } } }),
+    prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
     prisma.consola.findMany({
       where: { activa: true },
       orderBy: { numero: "asc" },
       include: { sesiones: { where: { fin: null }, take: 1 } },
     }),
-    prisma.servicio.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
-    prisma.ventaProducto.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
-    prisma.movimientoFinanciero.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
-    prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } }),
-    prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } }),
-    prisma.cierreDia.findFirst({ where: { fecha: hoy } }),
+    prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.ventaProducto.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
+    prisma.cierreFinanciero.findFirst({ where: { fecha: fechaDate } }),
+    prisma.cierreDia.findFirst({ where: { fecha: fechaDate } }),
     prisma.producto.findMany({ where: { activo: true } }),
-    prisma.gasto.findMany({ where: { fecha: { gte: hoy, lt: manana } } }),
+    prisma.gasto.findMany({ where: { fecha: fechaDate } }),
     prisma.configFinanciero.findFirst(),
   ]);
 
@@ -164,21 +159,20 @@ export async function cerrarDiaCompleto({
   if (saldoTarjetaReal !== undefined && (!Number.isFinite(saldoTarjetaReal) || saldoTarjetaReal < 0))
     throw new Error("El saldo de tarjeta debe ser un número válido mayor o igual a 0");
 
-  const hoy = hoyDate();
-  const manana = new Date(hoy.getTime() + 86400000);
+  const { fechaDate, inicio, fin } = getMexicoDia();
 
-  if (await prisma.cierreDia.findFirst({ where: { fecha: hoy } })) {
+  if (await prisma.cierreDia.findFirst({ where: { fecha: fechaDate } })) {
     throw new Error("El día ya fue cerrado");
   }
 
   const [sesionesXbox, serviciosHoy, ventasHoy, movimientos, apertura, cierreFinExistente] =
     await Promise.all([
-      prisma.sesionXbox.findMany({ where: { inicio: { gte: hoy, lt: manana }, fin: { not: null } } }),
-      prisma.servicio.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
-      prisma.ventaProducto.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
-      prisma.movimientoFinanciero.findMany({ where: { hora: { gte: hoy, lt: manana } } }),
-      prisma.aperturaFinanciero.findFirst({ where: { fecha: hoy } }),
-      prisma.cierreFinanciero.findFirst({ where: { fecha: hoy } }),
+      prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
+      prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+      prisma.ventaProducto.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+      prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+      prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
+      prisma.cierreFinanciero.findFirst({ where: { fecha: fechaDate } }),
     ]);
 
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
@@ -198,7 +192,7 @@ export async function cerrarDiaCompleto({
 
   await prisma.cierreDia.create({
     data: {
-      fecha: hoy,
+      fecha: fechaDate,
       totalXbox,
       totalServicios,
       totalFinanciero: 0,
@@ -227,7 +221,7 @@ export async function cerrarDiaCompleto({
 
     await prisma.cierreFinanciero.create({
       data: {
-        fecha: hoy,
+        fecha: fechaDate,
         sobrante: sobranteFinanciero ?? 0,
         efectivoFinal,
         cajaChicaCalculada: totalComisiones,

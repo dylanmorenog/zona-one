@@ -3,14 +3,11 @@
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
 import { cajaChicaEfecto, efectivoEfecto, tarjetaEfecto } from "@/lib/financiero";
+import { getMexicoDia, getMexicoRango } from "@/lib/fecha";
 
 function rangoFecha(fechaStr: string) {
-  const [y, m, d] = fechaStr.split("-").map(Number);
-  return {
-    inicio: new Date(y, m - 1, d),
-    fin: new Date(y, m - 1, d + 1),
-    fecha: new Date(y, m - 1, d),
-  };
+  const { inicio, fin, fechaDate } = getMexicoRango(fechaStr);
+  return { inicio, fin, fecha: fechaDate };
 }
 
 // ─── Día actual en tiempo real ────────────────────────────────────────────────
@@ -19,10 +16,7 @@ export async function getDiaActual() {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
 
-  const hoy = new Date();
-  const inicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const fin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1);
-  const fechaDate = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const { inicio, fin, fechaDate, mexStr } = getMexicoDia();
 
   const [
     sesionesXbox, servicios, ventas, movimientos, gastos,
@@ -68,7 +62,7 @@ export async function getDiaActual() {
     (m) => m.tipo === "RETIRO" && m.estado === "PENDIENTE"
   ).length;
 
-  const fechaStr = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
+  const fechaStr = mexStr;
 
   return {
     fecha: fechaStr,
@@ -327,8 +321,8 @@ export async function getComparativoSemanal() {
   const session = await getSession();
   if (session?.rol !== "DUENO") throw new Error("Solo el dueño");
 
-  const hoy = new Date();
-  const inicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 6);
+  const { y, m, d } = getMexicoDia();
+  const inicio = new Date(Date.UTC(y, m - 1, d - 6));
 
   const cierres = await prisma.cierreDia.findMany({
     where: { fecha: { gte: inicio } },
@@ -353,9 +347,9 @@ export async function getReporteMensual() {
   const session = await getSession();
   if (session?.rol !== "DUENO") throw new Error("Solo el dueño");
 
-  const hoy = new Date();
-  const inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-  const finMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1);
+  const { y, m } = getMexicoDia();
+  const inicioMes = new Date(Date.UTC(y, m - 1, 1));
+  const finMes = new Date(Date.UTC(y, m, 1));
 
   const cierres = await prisma.cierreDia.findMany({
     where: { fecha: { gte: inicioMes, lt: finMes } },
@@ -370,7 +364,7 @@ export async function getReporteMensual() {
   };
 
   return {
-    mes: `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`,
+    mes: `${y}-${String(m).padStart(2, "0")}`,
     totales,
     dias: cierres.map(c => ({
       fecha: c.fecha.toISOString().split("T")[0],

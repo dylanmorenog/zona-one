@@ -2,17 +2,11 @@
 
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
+import { getMexicoDia } from "@/lib/fecha";
 import { revalidatePath } from "next/cache";
 
-function inicioFinDia() {
-  const hoy = new Date();
-  const inicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const fin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() + 1);
-  return { inicio, fin };
-}
-
 export async function getDatosServicios() {
-  const { inicio, fin } = inicioFinDia();
+  const { inicio, fin } = getMexicoDia();
 
   const [tipos, serviciosHoy] = await Promise.all([
     prisma.tipoServicio.findMany({
@@ -70,9 +64,8 @@ export async function registrarServicio({
   if (!Number.isFinite(precioUnitario) || precioUnitario <= 0)
     throw new Error("El precio debe ser mayor a 0");
 
-  const hoy = new Date();
-  const hoyInicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  if (await prisma.cierreDia.findFirst({ where: { fecha: hoyInicio } })) {
+  const { fechaDate } = getMexicoDia();
+  if (await prisma.cierreDia.findFirst({ where: { fecha: fechaDate } })) {
     throw new Error("El día ya fue cerrado. Las operaciones reanudan mañana.");
   }
 

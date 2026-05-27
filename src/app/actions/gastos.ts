@@ -3,6 +3,7 @@
 import { getSession } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
 import { cajaChicaEfecto } from "@/lib/financiero";
+import { getMexicoDia, getMexicoRango } from "@/lib/fecha";
 import { revalidatePath } from "next/cache";
 
 async function requireAuth() {
@@ -24,24 +25,20 @@ async function getUsuarioId(rol: string) {
 }
 
 function fechaHoyStr(): string {
-  const hoy = new Date();
-  return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}-${String(hoy.getDate()).padStart(2, "0")}`;
+  return getMexicoDia().mexStr;
 }
 
-function parseFecha(fechaStr: string): { inicio: Date; fin: Date } {
-  const [y, m, d] = fechaStr.split("-").map(Number);
-  const inicio = new Date(y, m - 1, d);
-  const fin = new Date(inicio.getTime() + 86400000);
-  return { inicio, fin };
+function parseFecha(fechaStr: string) {
+  return getMexicoRango(fechaStr);
 }
 
 export async function getGastosDelDia(fechaStr?: string) {
   const session = await requireAuth();
   const fecha = session.rol === "EMPLEADO" ? fechaHoyStr() : (fechaStr ?? fechaHoyStr());
-  const { inicio, fin } = parseFecha(fecha);
+  const { fechaDate } = parseFecha(fecha);
 
   const gastos = await prisma.gasto.findMany({
-    where: { fecha: { gte: inicio, lt: fin } },
+    where: { fecha: fechaDate },
     include: { categoria: { select: { nombre: true } } },
     orderBy: { creadoEn: "asc" },
   });
@@ -59,14 +56,14 @@ export async function getGastosDelDia(fechaStr?: string) {
 export async function getResumenGastosDia(fechaStr?: string) {
   const session = await requireAuth();
   const fecha = session.rol === "EMPLEADO" ? fechaHoyStr() : (fechaStr ?? fechaHoyStr());
-  const { inicio, fin } = parseFecha(fecha);
+  const { fechaDate, inicio, fin } = parseFecha(fecha);
 
   const [sesionesXbox, servicios, ventas, movimientos, gastos] = await Promise.all([
     prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
     prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
     prisma.ventaProducto.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
     prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
-    prisma.gasto.findMany({ where: { fecha: { gte: inicio, lt: fin } } }),
+    prisma.gasto.findMany({ where: { fecha: fechaDate } }),
   ]);
 
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
@@ -101,7 +98,7 @@ export async function createGasto(data: {
 
   const empleadoId = await getUsuarioId(session.rol);
   const [y, m, d] = data.fecha.split("-").map(Number);
-  const fecha = new Date(y, m - 1, d);
+  const fecha = new Date(Date.UTC(y, m - 1, d));
 
   const gasto = await prisma.gasto.create({
     data: {
@@ -141,7 +138,7 @@ export async function updateGasto(
   if (data.monto <= 0) throw new Error("El monto debe ser mayor a cero");
 
   const [y, m, d] = data.fecha.split("-").map(Number);
-  const fecha = new Date(y, m - 1, d);
+  const fecha = new Date(Date.UTC(y, m - 1, d));
 
   await prisma.gasto.update({
     where: { id },
