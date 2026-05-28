@@ -414,9 +414,10 @@ export async function cerrarDia({
     throw new Error("El día ya fue cerrado");
   }
 
-  const [apertura, movimientos] = await Promise.all([
+  const [apertura, movimientos, efectivosExtra] = await Promise.all([
     prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
     prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.efectivoExtra.findMany({ where: { fecha: fechaDate } }),
   ]);
 
   if (!apertura) throw new Error("No hay apertura registrada hoy");
@@ -435,7 +436,8 @@ export async function cerrarDia({
     0
   );
 
-  const efectivoFinal = Number(apertura.efectivoEmpleada) + deltaEfectivo;
+  const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
+  const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo;
   const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
   const diferencia = saldoTarjetaReal - saldoTarjetaEsperado;
   const diferenciaCajaChica = cajaChicaReal - cajaChicaCalculada;

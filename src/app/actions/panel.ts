@@ -27,6 +27,7 @@ export async function getPanelDia() {
     todosProductos,
     gastosHoy,
     configFinanciero,
+    efectivosExtra,
   ] = await Promise.all([
     prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
     prisma.consola.findMany({
@@ -43,6 +44,7 @@ export async function getPanelDia() {
     prisma.producto.findMany({ where: { activo: true } }),
     prisma.gasto.findMany({ where: { fecha: fechaDate } }),
     prisma.configFinanciero.findFirst(),
+    prisma.efectivoExtra.findMany({ where: { fecha: fechaDate } }),
   ]);
 
   const totalXbox = sesionesXboxHoy.reduce((a, s) => a + Number(s.total), 0);
@@ -62,8 +64,9 @@ export async function getPanelDia() {
     (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
   );
 
+  const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
   const efectivoEmpleadaCalculado = aperturaFinanciero
-    ? Number(aperturaFinanciero.efectivoEmpleada) + deltaEfectivo
+    ? Number(aperturaFinanciero.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo
     : null;
   const saldoTarjetaCalculado = aperturaFinanciero
     ? Number(aperturaFinanciero.saldoTarjetaInicial) + deltaTarjeta
