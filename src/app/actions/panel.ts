@@ -57,10 +57,11 @@ export async function getPanelDia() {
   );
   const totalGastos = gastosHoy.reduce((a, g) => a + Number(g.monto), 0);
 
-  const deltaEfectivo = movimientos.reduce(
+  const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
+  const deltaEfectivo = movimientosNormales.reduce(
     (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
   );
-  const deltaTarjeta = movimientos.reduce(
+  const deltaTarjeta = movimientosNormales.reduce(
     (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
   );
 
