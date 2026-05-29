@@ -72,6 +72,7 @@ export function FinancieroPanel(props: EstadoFinanciero) {
   const [error, setError] = useState<string | null>(null);
   const [modalEditar, setModalEditar] = useState<Movimiento | null>(null);
   const [confirmarCancelar, setConfirmarCancelar] = useState<number | null>(null);
+  const [confirmarPendiente, setConfirmarPendiente] = useState<{ id: number; monto: number } | null>(null);
 
   const esDueno = props.rol === "DUENO";
 
@@ -136,13 +137,33 @@ export function FinancieroPanel(props: EstadoFinanciero) {
           const msg = tipo === "RETIRO" ? "Retiro registrado" : "Depósito registrado";
           ejecutar("nueva", () => registrarMovimiento(d as Parameters<typeof registrarMovimiento>[0]), msg);
         }}
-        onConfirmarRetiro={(id) => ejecutar(`confirmar-${id}`, () => confirmarRetiro(id), "Retiro confirmado")}
+        onConfirmarRetiro={(id) => {
+          const mov = props.movimientos.find((m) => m.id === id);
+          if (mov) setConfirmarPendiente({ id, monto: mov.monto });
+        }}
         onEditar={setModalEditar}
         onCancelar={setConfirmarCancelar}
         onReiniciar={() => ejecutar("reset", () => resetearDia())}
         movimientoHoy={hoy}
       />
 
+
+      {confirmarPendiente && (
+        <ModalConfirmarEntrega
+          monto={confirmarPendiente.monto}
+          cargando={!!cargando}
+          onConfirmar={(tipoComision) => {
+            const id = confirmarPendiente.id;
+            setConfirmarPendiente(null);
+            ejecutar(
+              `confirmar-${id}`,
+              () => confirmarRetiro(id, tipoComision),
+              "Retiro confirmado"
+            );
+          }}
+          onCancelar={() => setConfirmarPendiente(null)}
+        />
+      )}
 
       {modalEditar && (
         <ModalEditar
@@ -735,8 +756,8 @@ function FormOperacion({
             />
           )}
 
-          {/* Tipo de comisión — oculto si sinComision o ingresoDirecto */}
-          {!sinComision && !ingresoDirecto && (
+          {/* Tipo de comisión — oculto si sinComision, ingresoDirecto o pendiente */}
+          {!sinComision && !ingresoDirecto && !pendiente && (
             <div>
               <label className="mb-1.5 block text-sm text-gray-400">Cómo se cobró la comisión</label>
               <div className="space-y-1.5">
@@ -777,14 +798,21 @@ function FormOperacion({
 
           {/* Toggle pendiente (solo retiros) */}
           {tipo === "RETIRO" && (
-            <SwitchRow
-              activo={pendiente}
-              onToggle={() => setPendiente((v) => !v)}
-              colorActivo="bg-amber-500"
-              label={pendiente ? "Pendiente de entrega" : "Entrega inmediata"}
-              desc={pendiente ? "El cliente aún no llega" : "El cliente está presente"}
-              labelActivo="text-amber-300"
-            />
+            <>
+              <SwitchRow
+                activo={pendiente}
+                onToggle={() => setPendiente((v) => !v)}
+                colorActivo="bg-amber-500"
+                label={pendiente ? "Pendiente de entrega" : "Entrega inmediata"}
+                desc={pendiente ? "El cliente aún no llega" : "El cliente está presente"}
+                labelActivo="text-amber-300"
+              />
+              {pendiente && (
+                <p className="text-xs text-amber-400/70">
+                  La comisión y su tipo se definen al confirmar la entrega
+                </p>
+              )}
+            </>
           )}
 
           {/* Monto */}
@@ -1130,6 +1158,70 @@ function ModalConfirmarCancelar({
           <button onClick={onConfirmar} disabled={cargando}
             className="flex-1 rounded-lg bg-red-700 py-2.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-40">
             {cargando ? "Cancelando..." : "Sí, cancelar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal confirmar entrega pendiente ───────────────────────────────────────
+
+function ModalConfirmarEntrega({
+  monto,
+  cargando,
+  onConfirmar,
+  onCancelar,
+}: {
+  monto: number;
+  cargando: boolean;
+  onConfirmar: (tipoComision: "EFECTIVO" | "TRANSFERENCIA") => void;
+  onCancelar: () => void;
+}) {
+  const [tipoComision, setTipoComision] = useState<"EFECTIVO" | "TRANSFERENCIA">("EFECTIVO");
+  const comision = calcularComision(monto);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-gray-700 bg-gray-900 p-6 shadow-2xl space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-white">Confirmar entrega</h2>
+          <p className="text-sm text-gray-400 mt-0.5">¿Cómo cobró la comisión el cliente?</p>
+        </div>
+
+        <div className="rounded-lg bg-gray-800/50 px-3 py-2.5 text-sm flex justify-between items-center">
+          <span className="text-gray-400">Monto del retiro</span>
+          <span className="text-white font-bold">${fmt(monto)}</span>
+        </div>
+
+        <div className="space-y-1.5">
+          <ComisionOpcion
+            activo={tipoComision === "EFECTIVO"}
+            onClick={() => setTipoComision("EFECTIVO")}
+            titulo="Comisión en efectivo"
+            desc={`Cliente paga $${fmt(comision)} aparte en cash`}
+          />
+          <ComisionOpcion
+            activo={tipoComision === "TRANSFERENCIA"}
+            onClick={() => setTipoComision("TRANSFERENCIA")}
+            titulo="Comisión en transferencia"
+            desc={`Cliente transfirió $${fmt(monto + comision)} (retiro $${fmt(monto)} + comisión $${fmt(comision)})`}
+          />
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onCancelar}
+            className="flex-1 rounded-xl border border-gray-700 py-2.5 text-sm text-gray-400 hover:text-white transition"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => onConfirmar(tipoComision)}
+            disabled={cargando}
+            className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition"
+          >
+            {cargando ? "..." : "✓ Confirmar entrega"}
           </button>
         </div>
       </div>

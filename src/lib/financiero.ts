@@ -74,16 +74,19 @@ export function tarjetaEfecto(
   return 0;
 }
 
-// Calcula retiro real y comisión a partir del total que transfirió el cliente
-// Fórmula: comisión = total × (20/1020), redondeada a múltiplo de $20
+// Calcula retiro real y comisión a partir del total que transfirió el cliente.
+// Busca el n tal que comision = n*20 y ceil(retiro/1000) = n.
 export function calcularDesdeTotal(total: number): {
   retiro: number;
   comision: number;
 } {
-  const raw = total * (20 / 1020);
-  const comision = Math.max(20, Math.round(raw / 20) * 20);
-  const retiro = total - comision;
-  return { retiro, comision };
+  for (let n = 1; n <= 50; n++) {
+    const comision = n * 20;
+    const retiro = total - comision;
+    if (retiro <= 0) break;
+    if (Math.ceil(retiro / 1000) === n) return { retiro, comision };
+  }
+  return { retiro: Math.max(0, total - 20), comision: 20 };
 }
 
 // La caja chica solo crece cuando la operación está COMPLETADA

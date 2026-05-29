@@ -207,9 +207,10 @@ export async function registrarMovimiento({
   if (!apertura) throw new Error("Primero registra la apertura del día");
 
   // ingresoDirecto implica sinComision; ambos resultan en comisión $0
+  // PENDIENTE: comisión se define al confirmar la entrega
   const essinComision = sinComision || ingresoDirecto;
-  const comision = essinComision ? 0 : calcularComision(monto);
   const estado = tipo === "RETIRO" && pendiente ? "PENDIENTE" : "COMPLETADO";
+  const comision = essinComision || estado === "PENDIENTE" ? 0 : calcularComision(monto);
 
   // Verificar efectivo para retiros inmediatos (ingresoDirecto es siempre DEPOSITO, no aplica)
   if (tipo === "RETIRO" && estado === "COMPLETADO") {
@@ -257,7 +258,10 @@ export async function registrarMovimiento({
 
 // ─── Confirmar entrega de retiro pendiente ────────────────────────────────────
 
-export async function confirmarRetiro(movimientoId: number) {
+export async function confirmarRetiro(
+  movimientoId: number,
+  tipoComisionEntrega: "EFECTIVO" | "TRANSFERENCIA" = "EFECTIVO"
+) {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
 
@@ -270,6 +274,8 @@ export async function confirmarRetiro(movimientoId: number) {
 
   const apertura = await prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } });
   if (!apertura) throw new Error("Sin apertura del día");
+
+  const comision = mov.sinComision ? 0 : calcularComision(Number(mov.monto));
 
   const [movimientosRestantes, efectivoExtraHoy] = await Promise.all([
     prisma.movimientoFinanciero.findMany({
@@ -289,7 +295,7 @@ export async function confirmarRetiro(movimientoId: number) {
         0
       );
 
-  const necesario = efectivoNecesarioRetiro(mov.tipoComision, Number(mov.monto), Number(mov.comision));
+  const necesario = efectivoNecesarioRetiro(tipoComisionEntrega, Number(mov.monto), comision);
   if (necesario > efectivoActual) {
     throw new Error(
       `Sin efectivo suficiente para entregar. Disponible: $${efectivoActual.toLocaleString("es-MX")}`
@@ -298,7 +304,12 @@ export async function confirmarRetiro(movimientoId: number) {
 
   await prisma.movimientoFinanciero.update({
     where: { id: movimientoId },
-    data: { estado: "COMPLETADO", confirmadoEn: new Date() },
+    data: {
+      estado: "COMPLETADO",
+      tipoComision: tipoComisionEntrega,
+      comision,
+      confirmadoEn: new Date(),
+    },
   });
 
   revalidatePath("/dashboard/financiero");
