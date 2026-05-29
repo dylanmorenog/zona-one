@@ -221,14 +221,15 @@ export async function cerrarDiaCompleto({
     const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
     const finalSaldoTarjetaReal = saldoTarjetaReal ?? saldoTarjetaEsperado;
     const diferenciaFinanciero = finalSaldoTarjetaReal - saldoTarjetaEsperado;
-    const diferenciaCajaChica = cajaChicaReal - totalComisiones;
+    const cajaChicaCalculada = totalXbox + totalServicios + totalProductos + totalComisiones;
+    const diferenciaCajaChica = cajaChicaReal - cajaChicaCalculada;
 
     await prisma.cierreFinanciero.create({
       data: {
         fecha: fechaDate,
         sobrante: sobranteFinanciero ?? 0,
         efectivoFinal,
-        cajaChicaCalculada: totalComisiones,
+        cajaChicaCalculada,
         cajaChicaReal,
         diferenciaCajaChica,
         saldoTarjetaEsperado,

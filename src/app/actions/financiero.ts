@@ -425,10 +425,13 @@ export async function cerrarDia({
     throw new Error("El día ya fue cerrado");
   }
 
-  const [apertura, movimientos, efectivosExtra] = await Promise.all([
+  const [apertura, movimientos, efectivosExtra, sesionesXbox, serviciosHoy, ventasHoy] = await Promise.all([
     prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
     prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
     prisma.efectivoExtra.findMany({ where: { fecha: fechaDate } }),
+    prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
+    prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
+    prisma.ventaProducto.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
   ]);
 
   if (!apertura) throw new Error("No hay apertura registrada hoy");
@@ -442,10 +445,13 @@ export async function cerrarDia({
     (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const cajaChicaCalculada = movimientosNormales.reduce(
-    (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)),
-    0
+  const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
+  const totalServicios = serviciosHoy.reduce((a, s) => a + Number(s.total), 0);
+  const totalProductos = ventasHoy.reduce((a, v) => a + Number(v.total), 0);
+  const totalComisiones = movimientosNormales.reduce(
+    (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
+  const cajaChicaCalculada = totalXbox + totalServicios + totalProductos + totalComisiones;
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
   const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo;
