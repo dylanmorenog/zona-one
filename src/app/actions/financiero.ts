@@ -74,7 +74,7 @@ export async function getEstadoFinanciero() {
 
   const efectivoEmpleada =
     efectivoEmpleadaInicial !== null
-      ? efectivoEmpleadaInicial + deltaEfectivoNormal + totalEfectivoExtra
+      ? efectivoEmpleadaInicial + deltaEfectivoNormal + totalEfectivoExtra + totalIngresoDirecto
       : null;
 
   // saldoTarjeta ya refleja la salida por ingresoDirecto; cajaAzul = capital − tarjeta
@@ -444,12 +444,12 @@ export async function cerrarDia({
 
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const deltaEfectivo = movimientosNormales.reduce(
-    (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+    (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)),
     0
   );
   // Tarjeta incluye ingresoDirecto (baja tarjeta igual que un depósito normal)
   const deltaTarjeta = movimientos.reduce(
-    (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+    (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)),
     0
   );
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
@@ -461,7 +461,10 @@ export async function cerrarDia({
   const cajaChicaCalculada = totalXbox + totalServicios + totalProductos + totalComisiones;
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
-  const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo;
+  const totalIngresoDirecto = movimientos
+    .filter((m) => m.ingresoDirecto && m.estado === "COMPLETADO")
+    .reduce((a, m) => a + Number(m.monto), 0);
+  const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + totalIngresoDirecto + deltaEfectivo;
   const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
   const diferencia = saldoTarjetaReal - saldoTarjetaEsperado;
   const diferenciaCajaChica = cajaChicaReal - cajaChicaCalculada;

@@ -67,8 +67,11 @@ export async function getPanelDia() {
   );
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
+  const totalIngresoDirecto = movimientos
+    .filter(m => m.ingresoDirecto && m.estado === "COMPLETADO")
+    .reduce((a, m) => a + Number(m.monto), 0);
   const efectivoEmpleadaCalculado = aperturaFinanciero
-    ? Number(aperturaFinanciero.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo
+    ? Number(aperturaFinanciero.efectivoEmpleada) + totalEfectivoExtra + totalIngresoDirecto + deltaEfectivo
     : null;
   const saldoTarjetaCalculado = aperturaFinanciero
     ? Number(aperturaFinanciero.saldoTarjetaInicial) + deltaTarjeta
@@ -170,7 +173,7 @@ export async function cerrarDiaCompleto({
     throw new Error("El día ya fue cerrado");
   }
 
-  const [sesionesXbox, serviciosHoy, ventasHoy, movimientos, apertura, cierreFinExistente] =
+  const [sesionesXbox, serviciosHoy, ventasHoy, movimientos, apertura, cierreFinExistente, efectivosExtraHoy] =
     await Promise.all([
       prisma.sesionXbox.findMany({ where: { inicio: { gte: inicio, lt: fin }, fin: { not: null } } }),
       prisma.servicio.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
@@ -178,6 +181,7 @@ export async function cerrarDiaCompleto({
       prisma.movimientoFinanciero.findMany({ where: { hora: { gte: inicio, lt: fin } } }),
       prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
       prisma.cierreFinanciero.findFirst({ where: { fecha: fechaDate } }),
+      prisma.efectivoExtra.findMany({ where: { fecha: fechaDate } }),
     ]);
 
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
@@ -219,7 +223,11 @@ export async function cerrarDiaCompleto({
     const deltaTarjeta = movimientos.reduce(
       (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)), 0
     );
-    const efectivoFinal = Number(apertura.efectivoEmpleada) + deltaEfectivo;
+    const totalEfectivoExtraCierre = efectivosExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
+    const totalIngresosDirectos = movimientos
+      .filter((m) => m.ingresoDirecto && m.estado === "COMPLETADO")
+      .reduce((a, m) => a + Number(m.monto), 0);
+    const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtraCierre + totalIngresosDirectos + deltaEfectivo;
     const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
     const finalSaldoTarjetaReal = saldoTarjetaReal ?? saldoTarjetaEsperado;
     const diferenciaFinanciero = finalSaldoTarjetaReal - saldoTarjetaEsperado;
