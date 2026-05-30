@@ -43,15 +43,16 @@ export async function getEstadoFinanciero() {
   const efectivoEmpleadaInicial = apertura ? Number(apertura.efectivoEmpleada) : null;
   const saldoTarjetaInicial = apertura ? Number(apertura.saldoTarjetaInicial) : null;
 
-  // Los ingresos directos no afectan el efectivo de la empleada ni la tarjeta;
-  // van directo a la bolsa azul de Guadalupe.
+  // ingresoDirecto: no afecta el efectivo de la empleada, pero SÍ baja la tarjeta
+  // (es un retiro de tarjeta que va directo a la bolsa azul).
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const deltaEfectivoNormal = movimientosNormales.reduce(
     (a, m) =>
       a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const deltaTarjetaNormal = movimientosNormales.reduce(
+  // Tarjeta: incluye todos los movimientos (ingresoDirecto baja la tarjeta igual que un depósito)
+  const deltaTarjeta = movimientos.reduce(
     (a, m) =>
       a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
@@ -76,12 +77,13 @@ export async function getEstadoFinanciero() {
       ? efectivoEmpleadaInicial + deltaEfectivoNormal + totalEfectivoExtra
       : null;
 
+  // saldoTarjeta ya refleja la salida por ingresoDirecto; cajaAzul = capital − tarjeta
   const saldoTarjeta =
-    saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjetaNormal : null;
+    saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjeta : null;
 
   const cajaAzulTotal =
     capital !== null && saldoTarjeta !== null
-      ? capital - saldoTarjeta + totalIngresoDirecto
+      ? capital - saldoTarjeta
       : null;
 
   const sumaRetiros = movimientos
@@ -441,7 +443,8 @@ export async function cerrarDia({
     (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );
-  const deltaTarjeta = movimientosNormales.reduce(
+  // Tarjeta incluye ingresoDirecto (baja tarjeta igual que un depósito normal)
+  const deltaTarjeta = movimientos.reduce(
     (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
     0
   );

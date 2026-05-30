@@ -61,7 +61,8 @@ export async function getPanelDia() {
   const deltaEfectivo = movimientosNormales.reduce(
     (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
   );
-  const deltaTarjeta = movimientosNormales.reduce(
+  // Tarjeta incluye ingresoDirecto (baja tarjeta igual que un depósito normal)
+  const deltaTarjeta = movimientos.reduce(
     (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
   );
 
@@ -214,7 +215,8 @@ export async function cerrarDiaCompleto({
     const deltaEfectivo = movimientosNormales.reduce(
       (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
     );
-    const deltaTarjeta = movimientosNormales.reduce(
+    // Tarjeta incluye ingresoDirecto (baja tarjeta igual que un depósito normal)
+    const deltaTarjeta = movimientos.reduce(
       (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
     );
     const efectivoFinal = Number(apertura.efectivoEmpleada) + deltaEfectivo;
