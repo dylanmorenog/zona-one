@@ -48,13 +48,13 @@ export async function getEstadoFinanciero() {
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const deltaEfectivoNormal = movimientosNormales.reduce(
     (a, m) =>
-      a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+      a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)),
     0
   );
   // Tarjeta: incluye todos los movimientos (ingresoDirecto baja la tarjeta igual que un depósito)
   const deltaTarjeta = movimientos.reduce(
     (a, m) =>
-      a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+      a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)),
     0
   );
   const cajaChicaTotal = movimientosNormales.reduce(
@@ -123,9 +123,10 @@ export async function getEstadoFinanciero() {
       id: m.id,
       tipo: m.tipo as "RETIRO" | "DEPOSITO",
       estado: m.estado as "PENDIENTE" | "COMPLETADO" | "CANCELADO",
-      tipoComision: m.tipoComision as "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA",
+      tipoComision: m.tipoComision as "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA" | "MIXTA",
       monto: Number(m.monto),
       comision: Number(m.comision),
+      comisionTransferencia: m.comisionTransferencia !== null ? Number(m.comisionTransferencia) : null,
       sinComision: m.sinComision,
       ingresoDirecto: m.ingresoDirecto,
       notas: m.notas,
@@ -186,14 +187,16 @@ export async function registrarMovimiento({
   notas,
   sinComision = false,
   ingresoDirecto = false,
+  comisionTransferencia,
 }: {
   tipo: "RETIRO" | "DEPOSITO";
-  tipoComision: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA";
+  tipoComision: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA" | "MIXTA";
   pendiente?: boolean;
   monto: number;
   notas?: string;
   sinComision?: boolean;
   ingresoDirecto?: boolean;
+  comisionTransferencia?: number;
 }) {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
@@ -228,11 +231,11 @@ export async function registrarMovimiento({
         .filter((m) => !m.ingresoDirecto)
         .reduce(
           (a, m) =>
-            a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+            a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)),
           0
         );
 
-    const necesario = efectivoNecesarioRetiro(tipoComision, monto, comision);
+    const necesario = efectivoNecesarioRetiro(tipoComision, monto, comision, comisionTransferencia ?? 0);
     if (necesario > efectivoActual) {
       throw new Error(
         `Sin efectivo suficiente. Disponible: $${efectivoActual.toLocaleString("es-MX")}`
@@ -248,6 +251,7 @@ export async function registrarMovimiento({
       tipoComision,
       monto,
       comision,
+      comisionTransferencia: tipoComision === "MIXTA" ? (comisionTransferencia ?? 0) : null,
       sinComision: essinComision,
       ingresoDirecto,
       notas: notas?.trim() || null,
@@ -293,11 +297,11 @@ export async function confirmarRetiro(
       .filter((m) => !m.ingresoDirecto)
       .reduce(
         (a, m) =>
-          a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)),
+          a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)),
         0
       );
 
-  const necesario = efectivoNecesarioRetiro(tipoComisionEntrega, Number(mov.monto), comision);
+  const necesario = efectivoNecesarioRetiro(tipoComisionEntrega, Number(mov.monto), comision, Number(mov.comisionTransferencia ?? 0));
   if (necesario > efectivoActual) {
     throw new Error(
       `Sin efectivo suficiente para entregar. Disponible: $${efectivoActual.toLocaleString("es-MX")}`
@@ -348,7 +352,7 @@ export async function cancelarMovimiento(movimientoId: number) {
 
 export async function editarMovimiento(
   movimientoId: number,
-  { monto, notas, tipoComision }: { monto: number; notas?: string; tipoComision?: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA" }
+  { monto, notas, tipoComision }: { monto: number; notas?: string; tipoComision?: "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA" | "MIXTA" }
 ) {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");

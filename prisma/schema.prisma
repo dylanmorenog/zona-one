@@ -262,6 +262,7 @@ enum TipoComision {
   EFECTIVO      // cliente pagó/dio la comisión aparte en efectivo
   TRANSFERENCIA // retiro: cliente transfirió monto+comisión, comisión queda en tarjeta
   DESCONTADA    // depósito: se descuenta del monto transferido al cliente
+  MIXTA         // retiro: parte de la comisión en transferencia y parte en efectivo
 }
 
 model ConfigFinanciero {
@@ -289,10 +290,12 @@ model MovimientoFinanciero {
   id             Int              @id @default(autoincrement())
   tipo           TipoMovimiento
   estado         EstadoMovimiento @default(COMPLETADO)
-  tipoComision   TipoComision     @default(EFECTIVO) @map("tipo_comision")
-  monto          Decimal          @db.Decimal(12, 2)
-  comision       Decimal          @db.Decimal(10, 2)
-  sinComision    Boolean          @default(false) @map("sin_comision")
+  tipoComision            TipoComision     @default(EFECTIVO) @map("tipo_comision")
+  monto                  Decimal          @db.Decimal(12, 2)
+  comision               Decimal          @db.Decimal(10, 2)
+  // solo para MIXTA: parte de la comisión incluida en la transferencia
+  comisionTransferencia  Decimal?         @map("comision_transferencia") @db.Decimal(10, 2)
+  sinComision            Boolean          @default(false) @map("sin_comision")
   ingresoDirecto Boolean          @default(false) @map("ingreso_directo")
   notas          String?
   hora           DateTime         @default(now())

@@ -59,11 +59,11 @@ export async function getPanelDia() {
 
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const deltaEfectivo = movimientosNormales.reduce(
-    (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
+    (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)), 0
   );
   // Tarjeta incluye ingresoDirecto (baja tarjeta igual que un depósito normal)
   const deltaTarjeta = movimientos.reduce(
-    (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
+    (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)), 0
   );
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
@@ -213,11 +213,11 @@ export async function cerrarDiaCompleto({
 
   if (apertura && !cierreFinExistente) {
     const deltaEfectivo = movimientosNormales.reduce(
-      (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
+      (a, m) => a + efectivoEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)), 0
     );
     // Tarjeta incluye ingresoDirecto (baja tarjeta igual que un depósito normal)
     const deltaTarjeta = movimientos.reduce(
-      (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision)), 0
+      (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)), 0
     );
     const efectivoFinal = Number(apertura.efectivoEmpleada) + deltaEfectivo;
     const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;

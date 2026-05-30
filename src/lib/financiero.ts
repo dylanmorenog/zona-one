@@ -39,17 +39,18 @@ export function efectivoEfecto(
   estado: string,
   tipoComision: string,
   monto: number,
-  comision: number
+  comision: number,
+  comisionTransferencia = 0
 ): number {
   if (estado !== "COMPLETADO") return 0;
   if (tipo === "RETIRO") {
-    // efectivo en efectivo: solo baja el monto dado (comisión viene del cliente aparte)
-    // efectivo en transferencia: baja monto + comisión (da monto, extrae comisión a caja chica)
-    return tipoComision === "EFECTIVO" ? -monto : -(monto + comision);
+    if (tipoComision === "EFECTIVO") return -monto;
+    // MIXTA: baja monto + la parte de comisión que vino en transferencia
+    if (tipoComision === "MIXTA") return -(monto + comisionTransferencia);
+    // TRANSFERENCIA: baja monto + comisión completa
+    return -(monto + comision);
   }
   if (tipo === "DEPOSITO") {
-    // efectivo en efectivo: sube solo el monto (comisión viene del cliente aparte)
-    // descontada: sube monto pero extrae comisión a caja chica
     return tipoComision === "EFECTIVO" ? monto : monto - comision;
   }
   return 0;
@@ -60,15 +61,17 @@ export function tarjetaEfecto(
   estado: string,
   tipoComision: string,
   monto: number,
-  comision: number
+  comision: number,
+  comisionTransferencia = 0
 ): number {
   if (estado === "CANCELADO") return 0;
   if (tipo === "RETIRO") {
-    // PENDIENTE y COMPLETADO: el cliente ya transfirió
-    return tipoComision === "TRANSFERENCIA" ? monto + comision : monto;
+    if (tipoComision === "TRANSFERENCIA") return monto + comision;
+    // MIXTA: cliente transfirió monto + solo la parte de comisión en transferencia
+    if (tipoComision === "MIXTA") return monto + comisionTransferencia;
+    return monto; // EFECTIVO
   }
   if (tipo === "DEPOSITO" && estado === "COMPLETADO") {
-    // descontada: dueño transfiere monto-comision; efectivo: full monto
     return tipoComision === "DESCONTADA" ? -(monto - comision) : -monto;
   }
   return 0;
@@ -98,7 +101,10 @@ export function cajaChicaEfecto(estado: string, comision: number): number {
 export function efectivoNecesarioRetiro(
   tipoComision: string,
   monto: number,
-  comision: number
+  comision: number,
+  comisionTransferencia = 0
 ): number {
-  return tipoComision === "TRANSFERENCIA" ? monto + comision : monto;
+  if (tipoComision === "TRANSFERENCIA") return monto + comision;
+  if (tipoComision === "MIXTA") return monto + comisionTransferencia;
+  return monto; // EFECTIVO
 }

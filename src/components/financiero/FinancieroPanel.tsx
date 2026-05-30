@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 
 type TipoMov = "RETIRO" | "DEPOSITO";
 type EstadoMov = "PENDIENTE" | "COMPLETADO" | "CANCELADO";
-type TipoComision = "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA";
+type TipoComision = "EFECTIVO" | "TRANSFERENCIA" | "DESCONTADA" | "MIXTA";
 
 interface Movimiento {
   id: number;
@@ -27,6 +27,7 @@ interface Movimiento {
   tipoComision: TipoComision;
   monto: number;
   comision: number;
+  comisionTransferencia: number | null;
   sinComision: boolean;
   ingresoDirecto: boolean;
   notas: string | null;
@@ -559,12 +560,19 @@ function MovimientoRow({
                   ${fmt(mov.monto)} retiro + ${fmt(mov.comision)} comisión
                 </span>
               </div>
+            ) : mov.tipoComision === "MIXTA" && !esCancelado && !esEspecial ? (
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-white">${fmt(mov.monto)}</span>
+                <span className="text-xs text-gray-500">
+                  +${fmt(mov.comisionTransferencia ?? 0)} transf. +${fmt(mov.comision - (mov.comisionTransferencia ?? 0))} cash
+                </span>
+              </div>
             ) : (
               <span className={`text-sm font-bold ${esCancelado ? "line-through text-gray-500" : "text-white"}`}>
                 ${fmt(mov.monto)}
               </span>
             )}
-            {!esCancelado && !esEspecial && mov.tipoComision !== "TRANSFERENCIA" && (
+            {!esCancelado && !esEspecial && mov.tipoComision !== "TRANSFERENCIA" && mov.tipoComision !== "MIXTA" && (
               <>
                 <span className="text-xs text-gray-600">+${fmt(mov.comision)}</span>
                 <span className="text-xs text-gray-700">
@@ -633,6 +641,7 @@ function FormOperacion({
     notas?: string;
     sinComision?: boolean;
     ingresoDirecto?: boolean;
+    comisionTransferencia?: number;
   }) => void;
 }) {
   const [tipo, setTipo] = useState<TipoMov | null>(null);
@@ -641,28 +650,35 @@ function FormOperacion({
   const [sinComision, setSinComision] = useState(false);
   const [ingresoDirecto, setIngresoDirecto] = useState(false);
   const [monto, setMonto] = useState("");
+  const [comisionTransferenciaStr, setComisionTransferenciaStr] = useState("");
   const [notas, setNotas] = useState("");
 
   const montoNum = parseFloat(monto) || 0;
-
-  // Para RETIRO con comisión en transferencia:
-  // el empleado escribe el TOTAL que transfirió el cliente.
+  const esMixta = tipo === "RETIRO" && tipoComision === "MIXTA" && !sinComision;
   const esTransferencia = tipo === "RETIRO" && tipoComision === "TRANSFERENCIA" && !sinComision;
-  const { retiro: retiroCalculado, comision: comisionCalculada } =
+
+  // Cálculo de monto y comisión según tipo de comisión
+  const comisionTotal = sinComision || ingresoDirecto ? 0 : montoNum > 0 ? calcularComision(montoNum) : 0;
+  const comisionTransferenciaNum = esMixta ? Math.min(parseFloat(comisionTransferenciaStr) || 0, comisionTotal) : 0;
+  const comisionEfectivoNum = esMixta ? comisionTotal - comisionTransferenciaNum : 0;
+
+  const { retiro: retiroCalculado, comision: comisionDesdeTotal } =
     esTransferencia && montoNum > 0
       ? calcularDesdeTotal(montoNum)
-      : { retiro: montoNum, comision: sinComision || ingresoDirecto ? 0 : montoNum > 0 ? calcularComision(montoNum) : 0 };
+      : { retiro: montoNum, comision: comisionTotal };
 
   const montoRetiro = esTransferencia ? retiroCalculado : montoNum;
-  const comision = comisionCalculada;
+  const comision = esTransferencia ? comisionDesdeTotal : comisionTotal;
 
-  const efectivoNecesario =
-    tipo === "RETIRO" && tipoComision === "TRANSFERENCIA" && !sinComision
-      ? montoRetiro + comision
-      : montoRetiro;
+  const efectivoNecesario = esTransferencia
+    ? montoRetiro + comision
+    : esMixta
+    ? montoRetiro + comisionTransferenciaNum
+    : montoRetiro;
 
+  const mixtaValida = !esMixta || (comisionTransferenciaStr !== "" && comisionTransferenciaNum >= 0 && comisionTransferenciaNum <= comisionTotal);
   const sinEfectivo = tipo === "RETIRO" && !pendiente && montoNum > 0 && efectivoNecesario > efectivoEmpleada;
-  const valido = tipo !== null && montoNum > 0 && !cargando && !sinEfectivo && (esTransferencia ? retiroCalculado > 0 : true);
+  const valido = tipo !== null && montoNum > 0 && !cargando && !sinEfectivo && mixtaValida && (esTransferencia ? retiroCalculado > 0 : true);
 
   function efectoDescripcion(): string {
     if (!tipo || montoNum === 0) return "";
@@ -670,6 +686,7 @@ function FormOperacion({
     if (tipo === "RETIRO") {
       if (sinComision) return `Caja: −$${fmt(montoRetiro)} · Sin comisión`;
       if (tipoComision === "EFECTIVO") return `Caja: −$${fmt(montoRetiro)} · Caja chica: +$${fmt(comision)}`;
+      if (tipoComision === "MIXTA") return `Caja: −$${fmt(montoRetiro + comisionTransferenciaNum)} · Caja chica: +$${fmt(comision)}`;
       return `Caja: −$${fmt(montoRetiro + comision)} · Caja chica: +$${fmt(comision)}`;
     }
     if (tipoComision === "EFECTIVO") return `Caja: +$${fmt(montoRetiro)} · Caja chica: +$${fmt(comision)}`;
@@ -684,6 +701,12 @@ function FormOperacion({
     setSinComision(false);
     setIngresoDirecto(false);
     setTipoComision("EFECTIVO");
+    setComisionTransferenciaStr("");
+  }
+
+  function handleTipoComision(tc: TipoComision) {
+    setTipoComision(tc);
+    setComisionTransferenciaStr("");
   }
 
   function handleRegistrar() {
@@ -696,12 +719,14 @@ function FormOperacion({
       notas: notas.trim() || undefined,
       sinComision: sinComision || undefined,
       ingresoDirecto: ingresoDirecto || undefined,
+      comisionTransferencia: esMixta ? comisionTransferenciaNum : undefined,
     });
     setMonto("");
     setNotas("");
     setPendiente(false);
     setSinComision(false);
     setIngresoDirecto(false);
+    setComisionTransferenciaStr("");
   }
 
   return (
@@ -765,15 +790,21 @@ function FormOperacion({
                   <>
                     <ComisionOpcion
                       activo={tipoComision === "EFECTIVO"}
-                      onClick={() => setTipoComision("EFECTIVO")}
+                      onClick={() => handleTipoComision("EFECTIVO")}
                       titulo="Comisión en efectivo"
                       desc="Cliente transfirió el monto exacto y pagó la comisión aparte en cash"
                     />
                     <ComisionOpcion
                       activo={tipoComision === "TRANSFERENCIA"}
-                      onClick={() => setTipoComision("TRANSFERENCIA")}
+                      onClick={() => handleTipoComision("TRANSFERENCIA")}
                       titulo="Comisión en transferencia"
                       desc="Cliente transfirió monto + comisión juntos, recibe solo el monto en cash"
+                    />
+                    <ComisionOpcion
+                      activo={tipoComision === "MIXTA"}
+                      onClick={() => handleTipoComision("MIXTA")}
+                      titulo="Comisión mixta"
+                      desc="Parte de la comisión en transferencia y parte en efectivo aparte"
                     />
                   </>
                 ) : (
@@ -849,10 +880,53 @@ function FormOperacion({
               </div>
             )}
 
+            {/* Campos MIXTA */}
+            {esMixta && montoNum > 0 && (
+              <div className="mt-2 space-y-2">
+                <div className="rounded-lg bg-gray-800/60 px-3 py-2 text-xs flex justify-between">
+                  <span className="text-gray-400">Comisión total calculada</span>
+                  <span className="text-brand-400 font-medium">${fmt(comisionTotal)}</span>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-gray-400">En la transferencia</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                    <input
+                      type="number" min={0} max={comisionTotal} step={10}
+                      value={comisionTransferenciaStr}
+                      onChange={(e) => setComisionTransferenciaStr(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full rounded-lg border border-gray-700 bg-gray-800 py-2 pl-7 pr-3 text-sm font-bold text-white focus:border-brand-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+                {comisionTransferenciaStr !== "" && (
+                  <div className="rounded-lg bg-gray-800/40 px-3 py-2.5 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Retiro (da en efectivo)</span>
+                      <span className="text-white font-medium">${fmt(montoNum)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">+ Comisión en transferencia</span>
+                      <span className="text-brand-400">${fmt(comisionTransferenciaNum)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-gray-700 pt-1">
+                      <span className="text-gray-500">Total que transfiere</span>
+                      <span className="text-gray-300 font-medium">${fmt(montoNum + comisionTransferenciaNum)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs border-t border-gray-700 pt-1">
+                      <span className="text-gray-400">Comisión en efectivo aparte</span>
+                      <span className="text-brand-400">${fmt(comisionEfectivoNum)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Info efecto */}
             {montoNum > 0 && (
               <div className="mt-1.5 space-y-0.5">
-                {!sinComision && !ingresoDirecto && !esTransferencia && (
+                {!sinComision && !ingresoDirecto && !esTransferencia && !esMixta && (
                   <p className="text-xs text-gray-500">
                     Comisión: <span className="text-brand-400 font-medium">${fmt(comision)}</span>
                   </p>
