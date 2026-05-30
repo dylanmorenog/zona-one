@@ -67,11 +67,8 @@ export async function getPanelDia() {
   );
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
-  const totalIngresoDirecto = movimientos
-    .filter(m => m.ingresoDirecto && m.estado === "COMPLETADO")
-    .reduce((a, m) => a + Number(m.monto), 0);
   const efectivoEmpleadaCalculado = aperturaFinanciero
-    ? Number(aperturaFinanciero.efectivoEmpleada) + totalEfectivoExtra + totalIngresoDirecto + deltaEfectivo
+    ? Number(aperturaFinanciero.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo
     : null;
   const saldoTarjetaCalculado = aperturaFinanciero
     ? Number(aperturaFinanciero.saldoTarjetaInicial) + deltaTarjeta
@@ -224,10 +221,7 @@ export async function cerrarDiaCompleto({
       (a, m) => a + tarjetaEfecto(m.tipo, m.estado, m.tipoComision, Number(m.monto), Number(m.comision), Number(m.comisionTransferencia ?? 0)), 0
     );
     const totalEfectivoExtraCierre = efectivosExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
-    const totalIngresosDirectos = movimientos
-      .filter((m) => m.ingresoDirecto && m.estado === "COMPLETADO")
-      .reduce((a, m) => a + Number(m.monto), 0);
-    const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtraCierre + totalIngresosDirectos + deltaEfectivo;
+    const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtraCierre + deltaEfectivo;
     const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
     const finalSaldoTarjetaReal = saldoTarjetaReal ?? saldoTarjetaEsperado;
     const diferenciaFinanciero = finalSaldoTarjetaReal - saldoTarjetaEsperado;

@@ -74,7 +74,7 @@ export async function getEstadoFinanciero() {
 
   const efectivoEmpleada =
     efectivoEmpleadaInicial !== null
-      ? efectivoEmpleadaInicial + deltaEfectivoNormal + totalEfectivoExtra + totalIngresoDirecto
+      ? efectivoEmpleadaInicial + deltaEfectivoNormal + totalEfectivoExtra
       : null;
 
   // saldoTarjeta ya refleja la salida por ingresoDirecto; cajaAzul = capital − tarjeta
@@ -461,10 +461,7 @@ export async function cerrarDia({
   const cajaChicaCalculada = totalXbox + totalServicios + totalProductos + totalComisiones;
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
-  const totalIngresoDirecto = movimientos
-    .filter((m) => m.ingresoDirecto && m.estado === "COMPLETADO")
-    .reduce((a, m) => a + Number(m.monto), 0);
-  const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + totalIngresoDirecto + deltaEfectivo;
+  const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo;
   const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
   const diferencia = saldoTarjetaReal - saldoTarjetaEsperado;
   const diferenciaCajaChica = cajaChicaReal - cajaChicaCalculada;
