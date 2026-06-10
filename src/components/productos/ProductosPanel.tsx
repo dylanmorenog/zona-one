@@ -2,7 +2,8 @@
 
 import {
   guardarProducto,
-  registrarEntradaMercancia,
+  ajustarStock,
+  ponerStockEnCero,
   registrarVentaProducto,
   toggleActivoProducto,
   eliminarProducto,
@@ -192,14 +193,14 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
       )}
 
       {modalEntrada && (
-        <ModalEntrada
+        <ModalAjusteStock
           producto={modalEntrada}
           cargando={cargando}
-          onConfirmar={(productoId, cantidad) =>
+          onConfirmar={(productoId, cantidad, operacion) =>
             ejecutar(async () => {
-              await registrarEntradaMercancia({ productoId, cantidad });
+              await ajustarStock(productoId, cantidad, operacion);
               setModalEntrada(null);
-            })
+            }, operacion === "agregar" ? "Stock agregado" : "Stock quitado")
           }
           onCancelar={() => setModalEntrada(null)}
         />
@@ -217,6 +218,16 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
               setModalProducto(null);
             })
           }
+          onPonerStockCero={(id) =>
+            ejecutar(async () => {
+              await ponerStockEnCero(id);
+              setModalProducto(null);
+            }, "Stock puesto en 0")
+          }
+          onEliminar={(p) => {
+            setModalProducto(null);
+            setConfirmEliminar(p);
+          }}
           onCancelar={() => setModalProducto(null)}
         />
       )}
@@ -767,9 +778,9 @@ function ModalVenta({
   );
 }
 
-// ─── Modal Entrada de mercancía ───────────────────────────────────────────────
+// ─── Modal Ajuste de stock ────────────────────────────────────────────────────
 
-function ModalEntrada({
+function ModalAjusteStock({
   producto,
   cargando,
   onConfirmar,
@@ -777,17 +788,48 @@ function ModalEntrada({
 }: {
   producto: Producto;
   cargando: boolean;
-  onConfirmar: (id: number, cantidad: number) => void;
+  onConfirmar: (id: number, cantidad: number, operacion: "agregar" | "quitar") => void;
   onCancelar: () => void;
 }) {
+  const [operacion, setOperacion] = useState<"agregar" | "quitar">("agregar");
   const [cantidad, setCantidad] = useState<string>("1");
   const cantidadNum = parseInt(cantidad) || 0;
+
+  const resultante = operacion === "agregar"
+    ? producto.stockActual + cantidadNum
+    : producto.stockActual - cantidadNum;
+  const sinStock = operacion === "quitar" && resultante < 0;
+  const valido = cantidadNum > 0 && !sinStock;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl">
-        <h2 className="mb-1 text-base font-semibold text-white">Entrada de mercancía</h2>
+        <h2 className="mb-1 text-base font-semibold text-white">Ajustar stock</h2>
         <p className="mb-4 text-sm text-gray-400">{producto.nombre}</p>
+
+        {/* Toggle agregar / quitar */}
+        <div className="mb-4 grid grid-cols-2 gap-1.5 rounded-xl border border-gray-800 bg-gray-800/40 p-1">
+          <button
+            onClick={() => setOperacion("agregar")}
+            className={`rounded-lg py-2 text-sm font-semibold transition ${
+              operacion === "agregar"
+                ? "bg-emerald-700 text-white"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            + Agregar stock
+          </button>
+          <button
+            onClick={() => setOperacion("quitar")}
+            className={`rounded-lg py-2 text-sm font-semibold transition ${
+              operacion === "quitar"
+                ? "bg-red-700 text-white"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            − Quitar stock
+          </button>
+        </div>
 
         <div className="mb-4 flex items-center justify-between rounded-lg bg-gray-800/60 px-4 py-3">
           <span className="text-sm text-gray-400">Stock actual</span>
@@ -795,10 +837,11 @@ function ModalEntrada({
         </div>
 
         <div className="mb-4">
-          <label className="mb-1.5 block text-sm text-gray-400">Cantidad a agregar</label>
+          <label className="mb-1.5 block text-sm text-gray-400">Cantidad</label>
           <input
             type="number"
             min={1}
+            max={operacion === "quitar" ? producto.stockActual : undefined}
             value={cantidad}
             onChange={(e) => setCantidad(e.target.value)}
             autoFocus
@@ -809,11 +852,17 @@ function ModalEntrada({
         {cantidadNum > 0 && (
           <div className="mb-4 flex items-center justify-center gap-3 text-sm">
             <span className="text-gray-500">{producto.stockActual}</span>
-            <span className="text-gray-700">+{cantidadNum} =</span>
-            <span className="text-lg font-bold text-emerald-400">
-              {producto.stockActual + cantidadNum}
+            <span className="text-gray-700">{operacion === "agregar" ? `+${cantidadNum}` : `−${cantidadNum}`} =</span>
+            <span className={`text-lg font-bold ${sinStock ? "text-red-400" : operacion === "agregar" ? "text-emerald-400" : "text-amber-400"}`}>
+              {resultante}
             </span>
           </div>
+        )}
+
+        {sinStock && (
+          <p className="mb-3 text-xs text-red-400 text-center">
+            No hay suficiente stock. Disponible: {producto.stockActual}
+          </p>
         )}
 
         <div className="flex gap-3">
@@ -825,9 +874,11 @@ function ModalEntrada({
             Cancelar
           </button>
           <button
-            onClick={() => cantidadNum > 0 && onConfirmar(producto.id, cantidadNum)}
-            disabled={cargando || cantidadNum <= 0}
-            className="flex-1 rounded-lg bg-emerald-700 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-40"
+            onClick={() => valido && onConfirmar(producto.id, cantidadNum, operacion)}
+            disabled={cargando || !valido}
+            className={`flex-1 rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-40 transition ${
+              operacion === "agregar" ? "bg-emerald-700 hover:bg-emerald-600" : "bg-red-700 hover:bg-red-600"
+            }`}
           >
             {cargando ? "..." : "Confirmar"}
           </button>
@@ -845,6 +896,8 @@ function ModalProducto({
   categoriasCustom,
   cargando,
   onGuardar,
+  onPonerStockCero,
+  onEliminar,
   onCancelar,
 }: {
   producto: Producto | null;
@@ -863,6 +916,8 @@ function ModalProducto({
       stockInicial?: number;
     }
   ) => void;
+  onPonerStockCero: (id: number) => void;
+  onEliminar: (p: Producto) => void;
   onCancelar: () => void;
 }) {
   // Category select value: enum key OR "custom:nombre"
@@ -993,7 +1048,27 @@ function ModalProducto({
           )}
         </div>
 
-        <div className="mt-5 flex gap-3">
+        {/* Acciones de stock/eliminación — solo en modo edición */}
+        {!esNuevo && producto && (
+          <div className="mt-4 flex gap-2 border-t border-gray-800 pt-4">
+            <button
+              onClick={() => producto.stockActual > 0 && onPonerStockCero(producto.id)}
+              disabled={cargando || producto.stockActual === 0}
+              className="flex-1 rounded-lg border border-amber-800/50 py-2 text-xs font-medium text-amber-400 hover:bg-amber-950/30 disabled:opacity-30 transition"
+            >
+              Stock a 0
+            </button>
+            <button
+              onClick={() => onEliminar(producto)}
+              disabled={cargando}
+              className="flex-1 rounded-lg border border-red-900/50 py-2 text-xs font-medium text-red-400 hover:bg-red-950/30 disabled:opacity-30 transition"
+            >
+              Eliminar
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 flex gap-3">
           <button
             onClick={onCancelar}
             disabled={cargando}

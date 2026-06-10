@@ -99,21 +99,38 @@ export async function registrarVentaProducto({
   revalidatePath("/dashboard/productos");
 }
 
-export async function registrarEntradaMercancia({
-  productoId,
-  cantidad,
-}: {
-  productoId: number;
-  cantidad: number;
-}) {
+export async function ajustarStock(
+  productoId: number,
+  cantidad: number,
+  operacion: "agregar" | "quitar"
+) {
   const session = await getSession();
   if (!session) throw new Error("No autorizado");
 
-  await prisma.producto.update({
-    where: { id: productoId },
-    data: { stockActual: { increment: cantidad } },
-  });
+  if (operacion === "quitar") {
+    const producto = await prisma.producto.findUnique({ where: { id: productoId } });
+    if (!producto) throw new Error("Producto no encontrado");
+    if (producto.stockActual - cantidad < 0)
+      throw new Error(`No hay suficiente stock. Disponible: ${producto.stockActual}`);
+    await prisma.producto.update({
+      where: { id: productoId },
+      data: { stockActual: { decrement: cantidad } },
+    });
+  } else {
+    await prisma.producto.update({
+      where: { id: productoId },
+      data: { stockActual: { increment: cantidad } },
+    });
+  }
 
+  revalidatePath("/dashboard/productos");
+}
+
+export async function ponerStockEnCero(productoId: number) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  await prisma.producto.update({ where: { id: productoId }, data: { stockActual: 0 } });
   revalidatePath("/dashboard/productos");
 }
 
