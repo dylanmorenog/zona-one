@@ -938,7 +938,7 @@ function ModalProducto({
   const categoriaEnum = isCustom ? "OTRO" : categoriaSelect;
   const categoriaExtra = isCustom ? categoriaSelect.slice(7) : null;
 
-  const precioCostoValido = !esDueno || (precioCosto !== "" && parseFloat(precioCosto) > 0);
+  const precioCostoValido = !esDueno || (precioCosto !== "" && parseFloat(precioCosto) >= 0);
   const valido = nombre.trim() !== "" && parseFloat(precioVenta) > 0 && precioCostoValido;
   const gananciaPreview =
     esDueno && parseFloat(precioVenta) > 0 && parseFloat(precioCosto) > 0
