@@ -938,7 +938,7 @@ function ModalProducto({
   const categoriaEnum = isCustom ? "OTRO" : categoriaSelect;
   const categoriaExtra = isCustom ? categoriaSelect.slice(7) : null;
 
-  const precioCostoValido = !esDueno || (precioCosto !== "" && parseFloat(precioCosto) >= 0);
+  const precioCostoValido = !esDueno || precioCosto === "" || parseFloat(precioCosto) >= 0;
   const valido = nombre.trim() !== "" && parseFloat(precioVenta) > 0 && precioCostoValido;
   const gananciaPreview =
     esDueno && parseFloat(precioVenta) > 0 && parseFloat(precioCosto) > 0
@@ -999,7 +999,7 @@ function ModalProducto({
             </div>
             {esDueno && (
               <div>
-                <label className="mb-1 block text-sm text-gray-400">Precio costo *</label>
+                <label className="mb-1 block text-sm text-gray-400">Precio costo</label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">$</span>
                   <input
@@ -1084,7 +1084,7 @@ function ModalProducto({
                 categoria: categoriaEnum,
                 categoriaExtra,
                 precioVenta: parseFloat(precioVenta),
-                precioCosto: esDueno ? parseFloat(precioCosto) : 0,
+                precioCosto: esDueno ? parseFloat(precioCosto) || 0 : 0,
                 stockMinimo: parseInt(stockMinimo) || 0,
                 ...(esNuevo ? { stockInicial: parseInt(stockInicial) || 0 } : {}),
               })
