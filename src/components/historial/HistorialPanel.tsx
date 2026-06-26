@@ -250,7 +250,10 @@ function DiaActualCard({
               </p>
               <FilaArea label="Xbox" value={data.totalXbox} color="text-violet-400" />
               <FilaArea label="Servicios" value={data.totalServicios} color="text-sky-400" />
-              <FilaArea label="Productos" value={data.totalProductos} color="text-amber-400" />
+              <FilaArea label="Productos (efectivo)" value={data.totalProductosEfectivo} color="text-amber-400" />
+              {data.totalProductosTarjeta > 0 && (
+                <FilaArea label="Productos (tarjeta)" value={data.totalProductosTarjeta} color="text-purple-400" />
+              )}
               <FilaArea label="Comisiones" value={data.totalComisiones} color="text-emerald-400" />
               <div className="pt-2 border-t border-gray-800 flex items-center justify-between">
                 <span className="text-xs text-gray-400">Total</span>
@@ -601,6 +604,11 @@ function TarjetaProductos({ productos }: { productos: DiaSummary["productos"] })
           </div>
         </div>
         <p className="text-2xl font-bold text-amber-300">${fmt(productos.total)}</p>
+        {productos.totalTarjeta > 0 && (
+          <p className="mt-0.5 text-xs text-gray-500">
+            ${fmt(productos.totalEfectivo)} efectivo · ${fmt(productos.totalTarjeta)} tarjeta
+          </p>
+        )}
       </div>
 
       {abierto && tieneDetalle && (
@@ -609,7 +617,12 @@ function TarjetaProductos({ productos }: { productos: DiaSummary["productos"] })
             <div key={v.id} className="px-4 py-2.5 flex items-center justify-between">
               <div>
                 <p className="text-xs text-gray-300">{v.nombre}</p>
-                <p className="text-xs text-gray-600">{horaCorta(v.hora)} · ×{v.cantidad}</p>
+                <p className="text-xs text-gray-600">
+                  {horaCorta(v.hora)} · ×{v.cantidad}
+                  {v.metodoPago === "TARJETA" && (
+                    <span className="ml-1.5 rounded-full bg-purple-900/40 text-purple-300 px-1.5 py-0.5">tarjeta</span>
+                  )}
+                </p>
               </div>
               <span className="text-xs font-semibold text-amber-300">${fmt(v.total)}</span>
             </div>

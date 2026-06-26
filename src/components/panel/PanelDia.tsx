@@ -20,6 +20,7 @@ type CierreResumen = {
   totalXbox: number;
   totalServicios: number;
   totalProductos: number;
+  totalProductosTarjeta: number;
   totalComisiones: number;
   totalGeneral: number;
   efectivoEsperado: number;
@@ -38,6 +39,8 @@ export type PanelData = {
   totalServicios: number;
   cantidadServicios: number;
   totalProductos: number;
+  totalProductosEfectivo: number;
+  totalProductosTarjeta: number;
   cantidadVentas: number;
   totalComisiones: number;
   cajaChicaTotal: number;
@@ -171,7 +174,11 @@ export function PanelDia({ data, rol }: { data: PanelData; rol: string }) {
           <CompactCard
             label="Productos"
             value={`$${fmt(data.totalProductos)}`}
-            sub={`${data.cantidadVentas} venta${data.cantidadVentas !== 1 ? "s" : ""}`}
+            sub={
+              data.totalProductosTarjeta > 0
+                ? `$${fmt(data.totalProductosEfectivo)} efectivo · $${fmt(data.totalProductosTarjeta)} tarjeta`
+                : `${data.cantidadVentas} venta${data.cantidadVentas !== 1 ? "s" : ""}`
+            }
             accent="text-amber-300"
             border="border-amber-900/30 bg-amber-950/10"
           />
@@ -448,8 +455,13 @@ function ModalCierreDia({
               <span>Servicios</span><span>${fmt(data.totalServicios)}</span>
             </div>
             <div className="flex justify-between text-gray-500">
-              <span>Productos</span><span>${fmt(data.totalProductos)}</span>
+              <span>Productos (efectivo)</span><span>${fmt(data.totalProductosEfectivo)}</span>
             </div>
+            {data.totalProductosTarjeta > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>Productos (tarjeta, va al financiero)</span><span>${fmt(data.totalProductosTarjeta)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-gray-500">
               <span>Comisiones</span><span>${fmt(data.totalComisiones)}</span>
             </div>
@@ -655,7 +667,7 @@ function VistaDeciaCerrado({ cierre }: { cierre: CierreResumen }) {
         {[
           { label: "Renta Xbox", value: cierre.totalXbox, accent: "text-violet-300" },
           { label: "Servicios", value: cierre.totalServicios, accent: "text-sky-300" },
-          { label: "Productos", value: cierre.totalProductos, accent: "text-amber-300" },
+          { label: "Productos (efectivo)", value: cierre.totalProductos, accent: "text-amber-300" },
           { label: "Comisiones", value: cierre.totalComisiones, accent: "text-emerald-300" },
           { label: "Total día", value: cierre.totalGeneral, accent: "text-white" },
         ].map(item => (
@@ -667,6 +679,11 @@ function VistaDeciaCerrado({ cierre }: { cierre: CierreResumen }) {
           </div>
         ))}
       </div>
+      {cierre.totalProductosTarjeta > 0 && (
+        <p className="text-xs text-gray-500 -mt-1">
+          + ${fmt(cierre.totalProductosTarjeta)} en productos pagados con tarjeta (suman al financiero, no a la caja chica)
+        </p>
+      )}
 
       {/* Desglose fondo de cambio */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 space-y-1.5 text-sm">

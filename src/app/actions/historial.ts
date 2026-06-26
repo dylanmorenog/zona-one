@@ -36,13 +36,18 @@ export async function getDiaActual() {
 
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
   const totalServicios = servicios.reduce((a, s) => a + Number(s.total), 0);
-  const totalProductos = ventas.reduce((a, v) => a + Number(v.total), 0);
+  const ventasEfectivo = ventas.filter((v) => v.metodoPago !== "TARJETA");
+  const ventasTarjeta = ventas.filter((v) => v.metodoPago === "TARJETA");
+  const totalProductosEfectivo = ventasEfectivo.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductosTarjeta = ventasTarjeta.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductos = totalProductosEfectivo + totalProductosTarjeta;
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const totalComisiones = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
   const totalGastos = gastos.reduce((a, g) => a + Number(g.monto), 0);
-  const cajaChicaTotal = totalXbox + totalServicios + totalProductos + totalComisiones;
+  // caja chica física: solo cuenta lo pagado en efectivo
+  const cajaChicaTotal = totalXbox + totalServicios + totalProductosEfectivo + totalComisiones;
 
   const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
   const deltaEfectivo = movimientosNormales.reduce(
@@ -56,7 +61,10 @@ export async function getDiaActual() {
   const efectivoEmpleada = apertura
     ? Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo
     : null;
-  const saldoTarjeta = apertura ? Number(apertura.saldoTarjetaInicial) + deltaTarjeta : null;
+  // pagos de producto con tarjeta suman directo a la tarjeta, sin comisión
+  const saldoTarjeta = apertura
+    ? Number(apertura.saldoTarjetaInicial) + deltaTarjeta + totalProductosTarjeta
+    : null;
   const bolsaAzul = capital !== null && saldoTarjeta !== null ? capital - saldoTarjeta : null;
   const retirosPendientes = movimientos.filter(
     (m) => m.tipo === "RETIRO" && m.estado === "PENDIENTE"
@@ -71,6 +79,8 @@ export async function getDiaActual() {
     totalXbox,
     totalServicios,
     totalProductos,
+    totalProductosEfectivo,
+    totalProductosTarjeta,
     totalComisiones,
     totalGastos,
     cajaChicaTotal,
@@ -158,7 +168,11 @@ export async function getDiaSummary(fechaStr: string) {
     serviciosPorTipo[n].total += Number(s.total);
   }
   const totalServicios = servicios.reduce((a, s) => a + Number(s.total), 0);
-  const totalProductos = ventas.reduce((a, v) => a + Number(v.total), 0);
+  const ventasEfectivo = ventas.filter((v) => v.metodoPago !== "TARJETA");
+  const ventasTarjeta = ventas.filter((v) => v.metodoPago === "TARJETA");
+  const totalProductosEfectivo = ventasEfectivo.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductosTarjeta = ventasTarjeta.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductos = totalProductosEfectivo + totalProductosTarjeta;
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const totalComisiones = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
@@ -202,12 +216,15 @@ export async function getDiaSummary(fechaStr: string) {
     productos: {
       ventas: ventas.length,
       total: totalProductos,
+      totalEfectivo: totalProductosEfectivo,
+      totalTarjeta: totalProductosTarjeta,
       detalle: ventas.map(v => ({
         id: v.id,
         nombre: v.producto.nombre,
         hora: v.hora.toISOString(),
         cantidad: v.cantidad,
         total: Number(v.total),
+        metodoPago: v.metodoPago as "EFECTIVO" | "TARJETA",
       })),
     },
     comisiones: totalComisiones,
@@ -219,7 +236,8 @@ export async function getDiaSummary(fechaStr: string) {
       comision: Number(m.comision),
       estado: m.estado,
     })),
-    cajaChicaTotal: totalXbox + totalServicios + totalProductos + totalComisiones,
+    // caja chica física: solo cuenta lo pagado en efectivo
+    cajaChicaTotal: totalXbox + totalServicios + totalProductosEfectivo + totalComisiones,
 
     gastos: {
       total: totalGastos,
@@ -290,6 +308,7 @@ export async function getListaDias(page: number = 1) {
       totalXbox: true,
       totalServicios: true,
       totalProductos: true,
+      totalProductosTarjeta: true,
       totalComisiones: true,
       efectivoReal: true,
       diferencia: true,
@@ -302,7 +321,9 @@ export async function getListaDias(page: number = 1) {
       totalGeneral: Number(d.totalGeneral),
       totalXbox: Number(d.totalXbox),
       totalServicios: Number(d.totalServicios),
-      totalProductos: Number(d.totalProductos),
+      totalProductos: Number(d.totalProductos) + Number(d.totalProductosTarjeta),
+      totalProductosEfectivo: Number(d.totalProductos),
+      totalProductosTarjeta: Number(d.totalProductosTarjeta),
       totalComisiones: Number(d.totalComisiones),
       efectivoReal: Number(d.efectivoReal),
       diferencia: Number(d.diferencia),
@@ -333,7 +354,7 @@ export async function getComparativoSemanal() {
     fecha: c.fecha.toISOString().split("T")[0],
     totalXbox: Number(c.totalXbox),
     totalServicios: Number(c.totalServicios),
-    totalProductos: Number(c.totalProductos),
+    totalProductos: Number(c.totalProductos) + Number(c.totalProductosTarjeta),
     totalComisiones: Number(c.totalComisiones),
     cajaChicaTotal: Number(c.totalGeneral),
   }));
@@ -359,7 +380,7 @@ export async function getReporteMensual() {
   const totales = {
     xbox: cierres.reduce((a, c) => a + Number(c.totalXbox), 0),
     servicios: cierres.reduce((a, c) => a + Number(c.totalServicios), 0),
-    productos: cierres.reduce((a, c) => a + Number(c.totalProductos), 0),
+    productos: cierres.reduce((a, c) => a + Number(c.totalProductos) + Number(c.totalProductosTarjeta), 0),
     comisiones: cierres.reduce((a, c) => a + Number(c.totalComisiones), 0),
   };
 
@@ -370,7 +391,7 @@ export async function getReporteMensual() {
       fecha: c.fecha.toISOString().split("T")[0],
       totalXbox: Number(c.totalXbox),
       totalServicios: Number(c.totalServicios),
-      totalProductos: Number(c.totalProductos),
+      totalProductos: Number(c.totalProductos) + Number(c.totalProductosTarjeta),
       totalComisiones: Number(c.totalComisiones),
       cajaChicaTotal: Number(c.totalGeneral),
     })),

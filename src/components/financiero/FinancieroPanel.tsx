@@ -43,6 +43,7 @@ export interface EstadoFinanciero {
   saldoTarjeta: number | null;
   cajaAzulTotal: number | null;
   totalIngresoDirecto: number;
+  totalPagosProductoTarjeta: number;
   cajaChicaTotal: number; // interno, para Panel del Día; no se muestra aquí
   pendientes: number;
   sumaRetiros: number;
@@ -60,6 +61,7 @@ export interface EstadoFinanciero {
     diferencia: number;
   } | null;
   movimientos: Movimiento[];
+  pagosProductoTarjeta: { id: number; hora: string; monto: number }[];
   efectivosExtra: { id: number; hora: string; monto: number; notas: string | null }[];
   rol: string;
 }
@@ -447,39 +449,69 @@ function PanelOperaciones({
             </div>
           </div>
 
-          {props.movimientos.length === 0 ? (
+          {props.movimientos.length === 0 && props.pagosProductoTarjeta.length === 0 ? (
             <div className="flex-1 flex items-center justify-center">
               <p className="text-sm text-gray-600">Sin operaciones hoy</p>
             </div>
           ) : (
             <div className="flex-1 overflow-y-auto divide-y divide-gray-800/40">
-              {props.movimientos.map((m) => {
-                const esHoy = new Date(m.hora).toDateString() === movimientoHoy;
-                const puedeCancelar =
-                  esHoy && m.estado !== "CANCELADO" &&
-                  (m.tipo === "DEPOSITO" || m.estado === "PENDIENTE" || esDueno);
-                const puedeEditar = esHoy && m.estado !== "CANCELADO";
-                const esPendiente = m.estado === "PENDIENTE";
-                const esCancelado = m.estado === "CANCELADO";
+              {[
+                ...props.movimientos.map((m) => ({ kind: "movimiento" as const, hora: m.hora, mov: m })),
+                ...props.pagosProductoTarjeta.map((p) => ({ kind: "pagoProducto" as const, hora: p.hora, pago: p })),
+              ]
+                .sort((a, b) => new Date(b.hora).getTime() - new Date(a.hora).getTime())
+                .map((item) => {
+                  if (item.kind === "pagoProducto") {
+                    return <PagoProductoRow key={`pago-${item.pago.id}`} pago={item.pago} />;
+                  }
+                  const m = item.mov;
+                  const esHoy = new Date(m.hora).toDateString() === movimientoHoy;
+                  const puedeCancelar =
+                    esHoy && m.estado !== "CANCELADO" &&
+                    (m.tipo === "DEPOSITO" || m.estado === "PENDIENTE" || esDueno);
+                  const puedeEditar = esHoy && m.estado !== "CANCELADO";
+                  const esPendiente = m.estado === "PENDIENTE";
+                  const esCancelado = m.estado === "CANCELADO";
 
-                return (
-                  <MovimientoRow
-                    key={m.id}
-                    mov={m}
-                    esPendiente={esPendiente}
-                    esCancelado={esCancelado}
-                    puedeCancelar={puedeCancelar}
-                    puedeEditar={puedeEditar}
-                    cargandoConfirmar={cargando === `confirmar-${m.id}`}
-                    cargandoCancelar={cargando === `cancelar-${m.id}`}
-                    onConfirmarRetiro={() => onConfirmarRetiro(m.id)}
-                    onEditar={() => onEditar(m)}
-                    onCancelar={() => onCancelar(m.id)}
-                  />
-                );
-              })}
+                  return (
+                    <MovimientoRow
+                      key={m.id}
+                      mov={m}
+                      esPendiente={esPendiente}
+                      esCancelado={esCancelado}
+                      puedeCancelar={puedeCancelar}
+                      puedeEditar={puedeEditar}
+                      cargandoConfirmar={cargando === `confirmar-${m.id}`}
+                      cargandoCancelar={cargando === `cancelar-${m.id}`}
+                      onConfirmarRetiro={() => onConfirmarRetiro(m.id)}
+                      onEditar={() => onEditar(m)}
+                      onCancelar={() => onCancelar(m.id)}
+                    />
+                  );
+                })}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Fila de pago de producto con tarjeta (solo informativo) ─────────────────
+
+function PagoProductoRow({ pago }: { pago: { id: number; hora: string; monto: number } }) {
+  const hora = new Date(pago.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="px-4 py-3">
+      <div className="flex gap-3 items-start">
+        <span className="shrink-0 font-mono text-xs text-gray-600 pt-0.5 w-10">{hora}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="rounded-full px-2 py-0.5 text-xs font-semibold bg-purple-900/40 text-purple-300">
+              Pago de producto
+            </span>
+            <span className="text-sm font-bold text-white">${fmt(pago.monto)}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -1504,37 +1536,55 @@ function ResumenCierre({ props }: { props: EstadoFinanciero }) {
           Operaciones del día
         </p>
         <div className="divide-y divide-gray-800/50 max-h-64 overflow-y-auto">
-          {props.movimientos.map((m) => {
-            const hora = new Date(m.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
-            const esRetiro = m.tipo === "RETIRO";
-            const esEspecial = m.sinComision || m.ingresoDirecto;
-            const badgeLabel = m.ingresoDirecto ? "Ingreso de efectivo" : m.sinComision ? "Retiro sin comisión" : esRetiro ? "Retiro" : "Depósito";
-            const badgeClass = m.ingresoDirecto
-              ? "bg-blue-900/40 text-blue-300"
-              : esRetiro ? "bg-orange-900/40 text-orange-300" : "bg-emerald-900/40 text-emerald-300";
-            return (
-              <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${m.estado === "CANCELADO" ? "opacity-40" : ""}`}>
-                <span className="font-mono text-xs text-gray-600">{hora}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
-                  {badgeLabel}
-                </span>
-                {m.estado === "PENDIENTE" && <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs font-semibold text-amber-300">Pendiente</span>}
-                {m.estado === "CANCELADO" && <span className="text-xs text-gray-600">Cancelado</span>}
-                {m.tipoComision === "TRANSFERENCIA" && m.estado !== "CANCELADO" && !esEspecial ? (
-                  <div className="flex-1 flex flex-col">
-                    <span className="text-sm text-white font-medium">${fmt(m.monto + m.comision)}</span>
-                    <span className="text-xs text-gray-600">${fmt(m.monto)} + ${fmt(m.comision)} comisión</span>
+          {[
+            ...props.movimientos.map((m) => ({ kind: "movimiento" as const, hora: m.hora, mov: m })),
+            ...props.pagosProductoTarjeta.map((p) => ({ kind: "pagoProducto" as const, hora: p.hora, pago: p })),
+          ]
+            .sort((a, b) => new Date(b.hora).getTime() - new Date(a.hora).getTime())
+            .map((item) => {
+              if (item.kind === "pagoProducto") {
+                const hora = new Date(item.pago.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+                return (
+                  <div key={`pago-${item.pago.id}`} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className="font-mono text-xs text-gray-600">{hora}</span>
+                    <span className="rounded-full px-2 py-0.5 text-xs font-semibold bg-purple-900/40 text-purple-300">
+                      Pago de producto
+                    </span>
+                    <span className="flex-1 text-sm text-white font-medium">${fmt(item.pago.monto)}</span>
                   </div>
-                ) : (
-                  <span className="flex-1 text-sm text-white font-medium">${fmt(m.monto)}</span>
-                )}
-                {m.notas && <span className="text-xs text-gray-500 truncate max-w-32">{m.notas}</span>}
-                {!esEspecial && m.tipoComision !== "TRANSFERENCIA" && (
-                  <span className="text-xs text-gray-500 shrink-0">+${fmt(m.comision)}</span>
-                )}
-              </div>
-            );
-          })}
+                );
+              }
+              const m = item.mov;
+              const hora = new Date(m.hora).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
+              const esRetiro = m.tipo === "RETIRO";
+              const esEspecial = m.sinComision || m.ingresoDirecto;
+              const badgeLabel = m.ingresoDirecto ? "Ingreso de efectivo" : m.sinComision ? "Retiro sin comisión" : esRetiro ? "Retiro" : "Depósito";
+              const badgeClass = m.ingresoDirecto
+                ? "bg-blue-900/40 text-blue-300"
+                : esRetiro ? "bg-orange-900/40 text-orange-300" : "bg-emerald-900/40 text-emerald-300";
+              return (
+                <div key={m.id} className={`flex items-center gap-3 px-4 py-2.5 ${m.estado === "CANCELADO" ? "opacity-40" : ""}`}>
+                  <span className="font-mono text-xs text-gray-600">{hora}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badgeClass}`}>
+                    {badgeLabel}
+                  </span>
+                  {m.estado === "PENDIENTE" && <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs font-semibold text-amber-300">Pendiente</span>}
+                  {m.estado === "CANCELADO" && <span className="text-xs text-gray-600">Cancelado</span>}
+                  {m.tipoComision === "TRANSFERENCIA" && m.estado !== "CANCELADO" && !esEspecial ? (
+                    <div className="flex-1 flex flex-col">
+                      <span className="text-sm text-white font-medium">${fmt(m.monto + m.comision)}</span>
+                      <span className="text-xs text-gray-600">${fmt(m.monto)} + ${fmt(m.comision)} comisión</span>
+                    </div>
+                  ) : (
+                    <span className="flex-1 text-sm text-white font-medium">${fmt(m.monto)}</span>
+                  )}
+                  {m.notas && <span className="text-xs text-gray-500 truncate max-w-32">{m.notas}</span>}
+                  {!esEspecial && m.tipoComision !== "TRANSFERENCIA" && (
+                    <span className="text-xs text-gray-500 shrink-0">+${fmt(m.comision)}</span>
+                  )}
+                </div>
+              );
+            })}
         </div>
       </div>
     </div>

@@ -193,6 +193,8 @@ model CierreDia {
   totalServicios       Decimal  @map("total_servicios") @db.Decimal(10, 2)
   totalFinanciero      Decimal  @map("total_financiero") @db.Decimal(10, 2)
   totalProductos       Decimal  @map("total_productos") @db.Decimal(10, 2)
+  // ventas de productos pagadas con tarjeta (no entran a la caja chica física)
+  totalProductosTarjeta Decimal @default(0) @map("total_productos_tarjeta") @db.Decimal(10, 2)
   totalComisiones      Decimal  @map("total_comisiones") @db.Decimal(10, 2)
   // suma de todos los ingresos del día
   totalGeneral         Decimal  @map("total_general") @db.Decimal(10, 2)

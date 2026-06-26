@@ -99,6 +99,63 @@ export async function registrarVentaProducto({
   revalidatePath("/dashboard/productos");
 }
 
+export async function editarMetodoPagoVenta(
+  ventaId: number,
+  metodoPago: "EFECTIVO" | "TARJETA"
+) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const { fechaDate, inicio, fin } = getMexicoDia();
+  if (await prisma.cierreDia.findFirst({ where: { fecha: fechaDate } })) {
+    throw new Error("El día ya fue cerrado. Las operaciones reanudan mañana.");
+  }
+
+  const venta = await prisma.ventaProducto.findUnique({ where: { id: ventaId } });
+  if (!venta) throw new Error("Venta no encontrada");
+  if (venta.hora < inicio || venta.hora >= fin)
+    throw new Error("Solo se puede editar el método de pago de ventas del día actual");
+
+  await prisma.ventaProducto.update({
+    where: { id: ventaId },
+    data: { metodoPago },
+  });
+
+  revalidatePath("/dashboard/productos");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/financiero");
+  revalidatePath("/dashboard/historial");
+}
+
+export async function eliminarVenta(ventaId: number) {
+  const session = await getSession();
+  if (!session) throw new Error("No autorizado");
+
+  const { fechaDate, inicio, fin } = getMexicoDia();
+  if (await prisma.cierreDia.findFirst({ where: { fecha: fechaDate } })) {
+    throw new Error("El día ya fue cerrado. Las operaciones reanudan mañana.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const venta = await tx.ventaProducto.findUnique({ where: { id: ventaId } });
+    if (!venta) throw new Error("Venta no encontrada");
+    if (venta.hora < inicio || venta.hora >= fin)
+      throw new Error("Solo se pueden eliminar ventas del día actual");
+
+    await tx.producto.update({
+      where: { id: venta.productoId },
+      data: { stockActual: { increment: venta.cantidad } },
+    });
+
+    await tx.ventaProducto.delete({ where: { id: ventaId } });
+  });
+
+  revalidatePath("/dashboard/productos");
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/financiero");
+  revalidatePath("/dashboard/historial");
+}
+
 export async function ajustarStock(
   productoId: number,
   cantidad: number,

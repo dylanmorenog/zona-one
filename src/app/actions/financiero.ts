@@ -25,7 +25,7 @@ async function getEmpleadoId(rol: string) {
 export async function getEstadoFinanciero() {
   const { fechaDate, inicio, fin } = getMexicoDia();
 
-  const [config, apertura, movimientos, cierre, efectivoExtraHoy] = await Promise.all([
+  const [config, apertura, movimientos, cierre, efectivoExtraHoy, pagosProductoTarjeta] = await Promise.all([
     prisma.configFinanciero.findFirst(),
     prisma.aperturaFinanciero.findFirst({ where: { fecha: fechaDate } }),
     prisma.movimientoFinanciero.findMany({
@@ -35,6 +35,10 @@ export async function getEstadoFinanciero() {
     prisma.cierreFinanciero.findFirst({ where: { fecha: fechaDate } }),
     prisma.efectivoExtra.findMany({
       where: { fecha: fechaDate },
+      orderBy: { hora: "desc" },
+    }),
+    prisma.ventaProducto.findMany({
+      where: { hora: { gte: inicio, lt: fin }, metodoPago: "TARJETA" },
       orderBy: { hora: "desc" },
     }),
   ]);
@@ -71,6 +75,7 @@ export async function getEstadoFinanciero() {
   ).length;
 
   const totalEfectivoExtra = efectivoExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
+  const totalPagosProductoTarjeta = pagosProductoTarjeta.reduce((a, v) => a + Number(v.total), 0);
 
   const efectivoEmpleada =
     efectivoEmpleadaInicial !== null
@@ -78,8 +83,11 @@ export async function getEstadoFinanciero() {
       : null;
 
   // saldoTarjeta ya refleja la salida por ingresoDirecto; cajaAzul = capital − tarjeta
+  // pagos de producto con tarjeta suman directo a la tarjeta, sin comisión
   const saldoTarjeta =
-    saldoTarjetaInicial !== null ? saldoTarjetaInicial + deltaTarjeta : null;
+    saldoTarjetaInicial !== null
+      ? saldoTarjetaInicial + deltaTarjeta + totalPagosProductoTarjeta
+      : null;
 
   const cajaAzulTotal =
     capital !== null && saldoTarjeta !== null
@@ -101,6 +109,7 @@ export async function getEstadoFinanciero() {
     saldoTarjeta,
     cajaAzulTotal,
     totalIngresoDirecto,
+    totalPagosProductoTarjeta,
     cajaChicaTotal, // para Panel del Día; no se muestra en este módulo
     pendientes,
     sumaRetiros,
@@ -132,6 +141,11 @@ export async function getEstadoFinanciero() {
       notas: m.notas,
       hora: m.hora.toISOString(),
       confirmadoEn: m.confirmadoEn?.toISOString() ?? null,
+    })),
+    pagosProductoTarjeta: pagosProductoTarjeta.map((v) => ({
+      id: v.id,
+      hora: v.hora.toISOString(),
+      monto: Number(v.total),
     })),
     efectivosExtra: efectivoExtraHoy.map((e) => ({
       id: e.id,
@@ -454,7 +468,10 @@ export async function cerrarDia({
   );
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
   const totalServicios = serviciosHoy.reduce((a, s) => a + Number(s.total), 0);
-  const totalProductos = ventasHoy.reduce((a, v) => a + Number(v.total), 0);
+  const ventasEfectivo = ventasHoy.filter((v) => v.metodoPago !== "TARJETA");
+  const ventasTarjeta = ventasHoy.filter((v) => v.metodoPago === "TARJETA");
+  const totalProductos = ventasEfectivo.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductosTarjeta = ventasTarjeta.reduce((a, v) => a + Number(v.total), 0);
   const totalComisiones = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
@@ -462,7 +479,8 @@ export async function cerrarDia({
 
   const totalEfectivoExtra = efectivosExtra.reduce((a, e) => a + Number(e.monto), 0);
   const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo;
-  const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
+  // pagos de producto con tarjeta suman directo a la tarjeta, sin comisión
+  const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta + totalProductosTarjeta;
   const diferencia = saldoTarjetaReal - saldoTarjetaEsperado;
   const diferenciaCajaChica = cajaChicaReal - cajaChicaCalculada;
 

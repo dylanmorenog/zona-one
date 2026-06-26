@@ -7,6 +7,8 @@ import {
   registrarVentaProducto,
   toggleActivoProducto,
   eliminarProducto,
+  editarMetodoPagoVenta,
+  eliminarVenta,
 } from "@/app/actions/productos";
 import {
   createCategoriaProducto,
@@ -81,6 +83,8 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
   const [modalEntrada, setModalEntrada] = useState<Producto | null>(null);
   const [modalProducto, setModalProducto] = useState<Producto | "nuevo" | null>(null);
   const [confirmEliminar, setConfirmEliminar] = useState<Producto | null>(null);
+  const [modalEditarPagoVenta, setModalEditarPagoVenta] = useState<VentaHoy | null>(null);
+  const [confirmEliminarVenta, setConfirmEliminarVenta] = useState<VentaHoy | null>(null);
 
   const esDueno = rol === "DUENO";
 
@@ -160,6 +164,8 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
           totalHoy={totalHoy}
           busqueda={busqueda}
           onSeleccionar={setModalVenta}
+          onEditarPago={setModalEditarPagoVenta}
+          onEliminarVenta={setConfirmEliminarVenta}
         />
       )}
 
@@ -245,6 +251,34 @@ export function ProductosPanel({ productos, ventasHoy, totalHoy, categoriasCusto
           onCancelar={() => setConfirmEliminar(null)}
         />
       )}
+
+      {modalEditarPagoVenta && (
+        <ModalEditarPagoVenta
+          venta={modalEditarPagoVenta}
+          cargando={cargando}
+          onConfirmar={(metodoPago) =>
+            ejecutar(async () => {
+              await editarMetodoPagoVenta(modalEditarPagoVenta.id, metodoPago);
+              setModalEditarPagoVenta(null);
+            }, "Método de pago actualizado")
+          }
+          onCancelar={() => setModalEditarPagoVenta(null)}
+        />
+      )}
+
+      {confirmEliminarVenta && (
+        <ModalConfirmEliminarVenta
+          venta={confirmEliminarVenta}
+          cargando={cargando}
+          onConfirmar={() =>
+            ejecutar(async () => {
+              await eliminarVenta(confirmEliminarVenta.id);
+              setConfirmEliminarVenta(null);
+            }, "Venta eliminada")
+          }
+          onCancelar={() => setConfirmEliminarVenta(null)}
+        />
+      )}
     </div>
   );
 }
@@ -260,12 +294,16 @@ function VistaVenta({
   totalHoy,
   busqueda,
   onSeleccionar,
+  onEditarPago,
+  onEliminarVenta,
 }: {
   productos: Producto[];
   ventasHoy: VentaHoy[];
   totalHoy: number;
   busqueda: string;
   onSeleccionar: (p: Producto) => void;
+  onEditarPago: (v: VentaHoy) => void;
+  onEliminarVenta: (v: VentaHoy) => void;
 }) {
   const [filtro, setFiltro] = useState<Filtro>("TODOS");
 
@@ -401,15 +439,35 @@ function VistaVenta({
                     className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-800/40 last:border-0"
                   >
                     <span className="shrink-0 font-mono text-xs text-gray-600">{hora}</span>
-                    <span className="flex-1 min-w-0 truncate text-sm text-gray-300">
-                      {v.productoNombre}
-                      {v.cantidad > 1 && (
-                        <span className="ml-1 text-gray-600">×{v.cantidad}</span>
-                      )}
-                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="truncate text-sm text-gray-300">
+                        {v.productoNombre}
+                        {v.cantidad > 1 && (
+                          <span className="ml-1 text-gray-600">×{v.cantidad}</span>
+                        )}
+                      </span>
+                      <button
+                        onClick={() => onEditarPago(v)}
+                        className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs font-medium transition ${
+                          v.metodoPago === "TARJETA"
+                            ? "bg-purple-900/40 text-purple-300 hover:bg-purple-900/60"
+                            : "bg-gray-800 text-gray-500 hover:bg-gray-700"
+                        }`}
+                        title="Cambiar método de pago"
+                      >
+                        {v.metodoPago === "TARJETA" ? "tarjeta" : "efectivo"}
+                      </button>
+                    </div>
                     <span className="shrink-0 text-sm font-semibold text-white">
                       ${v.total.toFixed(0)}
                     </span>
+                    <button
+                      onClick={() => onEliminarVenta(v)}
+                      className="shrink-0 rounded-lg border border-gray-700 px-1.5 py-0.5 text-xs text-gray-500 hover:text-red-400 hover:border-red-900/50 transition"
+                      title="Eliminar venta"
+                    >
+                      ✕
+                    </button>
                   </div>
                 );
               })}
@@ -1125,6 +1183,105 @@ function ModalConfirmEliminar({
         </p>
         <p className="mb-5 text-xs text-gray-600">
           Solo es posible si no tiene ventas registradas.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={onCancelar}
+            disabled={cargando}
+            className="flex-1 rounded-lg border border-gray-700 py-2.5 text-sm font-medium text-gray-400 hover:bg-gray-800 disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirmar}
+            disabled={cargando}
+            className="flex-1 rounded-lg bg-red-700 py-2.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-40"
+          >
+            {cargando ? "..." : "Eliminar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal editar método de pago de una venta ────────────────────────────────
+
+function ModalEditarPagoVenta({
+  venta,
+  cargando,
+  onConfirmar,
+  onCancelar,
+}: {
+  venta: VentaHoy;
+  cargando: boolean;
+  onConfirmar: (metodoPago: "EFECTIVO" | "TARJETA") => void;
+  onCancelar: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancelar}>
+      <div
+        className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-1 text-base font-semibold text-white">Cambiar método de pago</h2>
+        <p className="mb-4 text-sm text-gray-400">
+          {venta.productoNombre} · ${venta.total.toFixed(0)}
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          {(["EFECTIVO", "TARJETA"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => onConfirmar(m)}
+              disabled={cargando || venta.metodoPago === m}
+              className={`rounded-xl border py-3 text-sm font-semibold transition disabled:opacity-40 ${
+                venta.metodoPago === m
+                  ? "border-brand-600/60 bg-brand-950/30 text-white"
+                  : "border-gray-700 bg-gray-800/40 text-gray-400 hover:border-gray-600 hover:text-gray-200"
+              }`}
+            >
+              {m === "EFECTIVO" ? "Efectivo" : "Tarjeta"}
+            </button>
+          ))}
+        </div>
+        <p className="mb-4 text-xs text-gray-600">
+          Recalcula automáticamente la caja chica y el saldo de tarjeta del día.
+        </p>
+        <button
+          onClick={onCancelar}
+          disabled={cargando}
+          className="w-full rounded-lg border border-gray-700 py-2.5 text-sm font-medium text-gray-400 hover:bg-gray-800 disabled:opacity-50"
+        >
+          Cerrar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal confirmar eliminar venta ──────────────────────────────────────────
+
+function ModalConfirmEliminarVenta({
+  venta,
+  cargando,
+  onConfirmar,
+  onCancelar,
+}: {
+  venta: VentaHoy;
+  cargando: boolean;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onCancelar}>
+      <div
+        className="w-full max-w-xs rounded-2xl border border-gray-700 bg-gray-900 p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-2 text-base font-semibold text-white">¿Eliminar esta venta?</h2>
+        <p className="mb-5 text-sm text-gray-400">
+          Se eliminará la venta de <span className="text-white">{venta.productoNombre}</span> (${venta.total.toFixed(0)})
+          y se repondrá el stock vendido.
         </p>
         <div className="flex gap-3">
           <button

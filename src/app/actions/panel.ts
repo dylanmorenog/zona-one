@@ -51,7 +51,11 @@ export async function getPanelDia() {
   const minutosXbox = sesionesXboxHoy.reduce((a, s) => a + (s.duracionMinutos ?? 0), 0);
 
   const totalServicios = serviciosHoy.reduce((a, s) => a + Number(s.total), 0);
-  const totalProductos = ventasHoy.reduce((a, v) => a + Number(v.total), 0);
+  const ventasEfectivo = ventasHoy.filter((v) => v.metodoPago !== "TARJETA");
+  const ventasTarjeta = ventasHoy.filter((v) => v.metodoPago === "TARJETA");
+  const totalProductosEfectivo = ventasEfectivo.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductosTarjeta = ventasTarjeta.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductos = totalProductosEfectivo + totalProductosTarjeta;
   const totalComisiones = movimientos.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
@@ -70,8 +74,9 @@ export async function getPanelDia() {
   const efectivoEmpleadaCalculado = aperturaFinanciero
     ? Number(aperturaFinanciero.efectivoEmpleada) + totalEfectivoExtra + deltaEfectivo
     : null;
+  // pagos de producto con tarjeta suman directo a la tarjeta, sin comisión
   const saldoTarjetaCalculado = aperturaFinanciero
-    ? Number(aperturaFinanciero.saldoTarjetaInicial) + deltaTarjeta
+    ? Number(aperturaFinanciero.saldoTarjetaInicial) + deltaTarjeta + totalProductosTarjeta
     : null;
 
   const pendientesRetiro = movimientos.filter(
@@ -88,9 +93,12 @@ export async function getPanelDia() {
     totalServicios,
     cantidadServicios: serviciosHoy.length,
     totalProductos,
+    totalProductosEfectivo,
+    totalProductosTarjeta,
     cantidadVentas: ventasHoy.length,
     totalComisiones,
-    cajaChicaTotal: totalXbox + totalServicios + totalProductos + totalComisiones,
+    // caja chica física: solo cuenta lo pagado en efectivo
+    cajaChicaTotal: totalXbox + totalServicios + totalProductosEfectivo + totalComisiones,
     totalGastos,
     gananciaNeta: totalXbox + totalServicios + totalProductos + totalComisiones - totalGastos,
     pendientesRetiro,
@@ -129,6 +137,7 @@ export async function getPanelDia() {
           totalXbox: Number(cierreDia.totalXbox),
           totalServicios: Number(cierreDia.totalServicios),
           totalProductos: Number(cierreDia.totalProductos),
+          totalProductosTarjeta: Number(cierreDia.totalProductosTarjeta),
           totalComisiones: Number(cierreDia.totalComisiones),
           totalGeneral: Number(cierreDia.totalGeneral),
           efectivoEsperado: Number(cierreDia.efectivoEsperado),
@@ -183,13 +192,17 @@ export async function cerrarDiaCompleto({
 
   const totalXbox = sesionesXbox.reduce((a, s) => a + Number(s.total), 0);
   const totalServicios = serviciosHoy.reduce((a, s) => a + Number(s.total), 0);
-  const totalProductos = ventasHoy.reduce((a, v) => a + Number(v.total), 0);
+  const ventasEfectivo = ventasHoy.filter((v) => v.metodoPago !== "TARJETA");
+  const ventasTarjeta = ventasHoy.filter((v) => v.metodoPago === "TARJETA");
+  const totalProductos = ventasEfectivo.reduce((a, v) => a + Number(v.total), 0);
+  const totalProductosTarjeta = ventasTarjeta.reduce((a, v) => a + Number(v.total), 0);
 
   // Filtrar ingresoDirecto para no afectar caja chica ni tarjeta
   const movimientosNormales = movimientos.filter((m) => !m.ingresoDirecto);
   const totalComisiones = movimientosNormales.reduce(
     (a, m) => a + cajaChicaEfecto(m.estado, Number(m.comision)), 0
   );
+  // totalGeneral/efectivoEsperado: caja chica física, solo ventas en efectivo
   const totalGeneral = totalXbox + totalServicios + totalProductos + totalComisiones;
   const efectivoEsperado = totalGeneral;
   const diferencia = cajaChicaReal - efectivoEsperado;
@@ -203,6 +216,7 @@ export async function cerrarDiaCompleto({
       totalServicios,
       totalFinanciero: 0,
       totalProductos,
+      totalProductosTarjeta,
       totalComisiones,
       totalGeneral,
       efectivoEsperado,
@@ -222,7 +236,8 @@ export async function cerrarDiaCompleto({
     );
     const totalEfectivoExtraCierre = efectivosExtraHoy.reduce((a, e) => a + Number(e.monto), 0);
     const efectivoFinal = Number(apertura.efectivoEmpleada) + totalEfectivoExtraCierre + deltaEfectivo;
-    const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta;
+    // pagos de producto con tarjeta suman directo a la tarjeta, sin comisión
+    const saldoTarjetaEsperado = Number(apertura.saldoTarjetaInicial) + deltaTarjeta + totalProductosTarjeta;
     const finalSaldoTarjetaReal = saldoTarjetaReal ?? saldoTarjetaEsperado;
     const diferenciaFinanciero = finalSaldoTarjetaReal - saldoTarjetaEsperado;
     const cajaChicaCalculada = totalXbox + totalServicios + totalProductos + totalComisiones;
